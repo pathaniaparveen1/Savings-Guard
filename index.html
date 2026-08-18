@@ -457,6 +457,10 @@ function importData(ev){
    SETUP: replace ONEDRIVE_CLIENT_ID below with your Azure "Application (client) ID".
    Redirect URI in Azure must exactly match this page's deployed URL (SPA platform). */
 const ONEDRIVE_CLIENT_ID = '747dd2f5-4df7-4329-b157-a6134d0b79bb';
+// Fixed to exactly match the Redirect URI registered in Azure — must be identical whether the
+// app is opened as a normal Safari tab or from the Home Screen icon (which loads index.html directly
+// and would otherwise produce a different pathname, causing a redirect_uri mismatch).
+const ONEDRIVE_REDIRECT_URI = 'https://pathaniaparveen1.github.io/Savings-Guard/';
 const OD_SCOPES = ['Files.ReadWrite.AppFolder'];
 let msalApp=null, odAccount=null;
 
@@ -467,7 +471,7 @@ function initMsal(){
   if(!msalApp){
     msalApp = new msal.PublicClientApplication({
       auth:{ clientId:ONEDRIVE_CLIENT_ID, authority:'https://login.microsoftonline.com/consumers',
-             redirectUri: window.location.origin + window.location.pathname },
+             redirectUri: ONEDRIVE_REDIRECT_URI },
       cache:{ cacheLocation:'localStorage' }
     });
   }
