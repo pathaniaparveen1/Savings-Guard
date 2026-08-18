@@ -1,12 +1,12 @@
 {
-  "name": "Saving Guard \u2014 \u20b925K Saving Tracker",
-  "short_name": "Saving Guard",
+  "name": "ArthSetu \u2014 \u20b925K Saving Tracker",
+  "short_name": "ArthSetu",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f5f5f7",
-  "theme_color": "#111111",
+  "background_color": "#F2F2F7",
+  "theme_color": "#F2F2F7",
   "description": "Personal daily expense tracker protecting a \u20b925,000 monthly saving target.",
   "icons": [
     {
