@@ -418,9 +418,9 @@ function clearAll(){
    expenses=[]; persist(); recalc(); toast('Month reset');
  }
 }
-function toast(msg){
+function toast(msg, ms){
  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
- clearTimeout(toast._h); toast._h=setTimeout(()=>t.classList.remove('show'),2200);
+ clearTimeout(toast._h); toast._h=setTimeout(()=>t.classList.remove('show'),ms||2200);
 }
 
 /* ===== Navigation ===== */
@@ -475,7 +475,8 @@ function initMsal(){
 }
 
 async function onedriveConnect(){
-  if(!odConfigured()){ toast('⚠️ OneDrive Client ID not set yet'); return; }
+  if(!odConfigured()){ toast('⚠️ OneDrive Client ID not set yet',4000); return; }
+  if(typeof msal==='undefined'){ toast('⚠️ MSAL library did not load — check network/CDN block',4000); return; }
   const app=initMsal();
   try{
     const res = await app.loginPopup({scopes:OD_SCOPES});
@@ -484,7 +485,7 @@ async function onedriveConnect(){
     updateOdUI(true);
     toast('OneDrive connected');
     onedriveSyncNow();
-  }catch(e){ toast('⚠️ OneDrive connect failed'); console.error(e); }
+  }catch(e){ toast('⚠️ '+(e && (e.errorCode||e.message) ? (e.errorCode||e.message) : 'OneDrive connect failed'),5000); console.error(e); }
 }
 
 async function odGetToken(){
