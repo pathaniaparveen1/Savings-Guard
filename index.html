@@ -503,9 +503,27 @@ async function odGetToken(){
   }
 }
 
-async function onedriveSyncNow(){
+async function onedriveSyncNow(force){
   const token=await odGetToken();
   if(!token){ toast('⚠️ Not connected to OneDrive'); updateOdUI(false); return; }
+
+  // Safety check: don't silently overwrite a remote backup that has more entries than we do —
+  // this is exactly how a fresh/empty storage context (e.g. iOS keeps Home Screen app storage
+  // separate from Safari tab storage for the same URL) can wipe out a good cloud backup.
+  if(!force){
+    try{
+      const chk=await fetch('https://graph.microsoft.com/v1.0/me/drive/special/approot:/arthsetu-backup.json:/content',{headers:{'Authorization':'Bearer '+token}});
+      if(chk.ok){
+        const remote=await chk.json();
+        const remoteCount=(remote.expenses||[]).length;
+        if(remoteCount>expenses.length){
+          const ok=confirm(`OneDrive par ${remoteCount} entries hain, is device par sirf ${expenses.length}. Overwrite karne se OneDrive ka extra data mit jayega.\n\nOK = overwrite anyway\nCancel = ruk jao (pehle "Import backup" se remote data yahan la sakte hain)`);
+          if(!ok){ toast('Sync roka gaya — data safe hai',3000); return; }
+        }
+      }
+    }catch(e){ /* remote check failed (e.g. file doesn't exist yet) — safe to proceed */ }
+  }
+
   const payload={app:"ArthSetu",version:APP_VERSION,exportedAt:new Date().toISOString(),config:CFG,expenses};
   try{
     const res=await fetch('https://graph.microsoft.com/v1.0/me/drive/special/approot:/arthsetu-backup.json:/content',{
