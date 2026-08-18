@@ -121,7 +121,7 @@ body{
   backdrop-filter:blur(20px) saturate(1.6); -webkit-backdrop-filter:blur(20px) saturate(1.6);
   border-top:0.5px solid var(--sep);
 }
-.tab{background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:2px; color:var(--muted); font:inherit; font-size:10.5px; font-weight:600; padding:4px 10px; cursor:pointer; width:25%}
+.tab{background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:2px; color:var(--muted); font:inherit; font-size:10.5px; font-weight:600; padding:4px 6px; cursor:pointer; flex:1}
 .tab .ic{font-size:22px; line-height:1}
 .tab.active{color:var(--accent)}
 .tab:active{opacity:.6}
@@ -479,12 +479,9 @@ async function onedriveConnect(){
   if(typeof msal==='undefined'){ toast('⚠️ MSAL library did not load — check network/CDN block',4000); return; }
   const app=initMsal();
   try{
-    const res = await app.loginPopup({scopes:OD_SCOPES});
-    odAccount = res.account;
-    localStorage.setItem('odAccountId', odAccount.homeAccountId);
-    updateOdUI(true);
-    toast('OneDrive connected');
-    onedriveSyncNow();
+    localStorage.setItem('odConnecting','1'); // survives the full-page redirect
+    await app.loginRedirect({scopes:OD_SCOPES});
+    // page navigates away here; nothing after this line runs until we come back
   }catch(e){ toast('⚠️ '+(e && (e.errorCode||e.message) ? (e.errorCode||e.message) : 'OneDrive connect failed'),5000); console.error(e); }
 }
 
@@ -497,7 +494,7 @@ async function odGetToken(){
     const res=await app.acquireTokenSilent({scopes:OD_SCOPES, account:odAccount});
     return res.accessToken;
   }catch(e){
-    try{ const res=await app.acquireTokenPopup({scopes:OD_SCOPES, account:odAccount}); return res.accessToken; }
+    try{ await app.acquireTokenRedirect({scopes:OD_SCOPES, account:odAccount}); return null; } // navigates away
     catch(e2){ return null; }
   }
 }
@@ -564,12 +561,31 @@ if(/iPhone|iPad|iPod/i.test(navigator.userAgent) && !window.navigator.standalone
 }
 
 // Restore OneDrive connection state on load (msal script loads with `defer`, so wait for it)
-window.addEventListener('load', ()=>{
-  if(odConfigured() && typeof msal!=='undefined'){
-    const app=initMsal();
-    updateOdUI(app.getAllAccounts().length>0);
-  } else {
-    updateOdUI(false);
+// Also completes the redirect-based login flow when we're coming back from Microsoft's login page.
+window.addEventListener('load', async ()=>{
+  if(!odConfigured() || typeof msal==='undefined'){ updateOdUI(false); return; }
+  const app=initMsal();
+  try{
+    const res = await app.handleRedirectPromise(); // processes the #code=... fragment if present, else resolves null
+    if(res && res.account){
+      odAccount=res.account;
+      localStorage.setItem('odAccountId', odAccount.homeAccountId);
+      localStorage.removeItem('odConnecting');
+      toast('OneDrive connected');
+      updateOdUI(true);
+      go('cards'); // land somewhere sensible after the round-trip back from Microsoft
+      onedriveSyncNow();
+      return;
+    }
+  }catch(e){
+    localStorage.removeItem('odConnecting');
+    toast('⚠️ '+(e && (e.errorCode||e.message) ? (e.errorCode||e.message) : 'OneDrive login failed'),5000);
+    console.error(e);
+  }
+  updateOdUI(app.getAllAccounts().length>0);
+  if(localStorage.getItem('odConnecting')){
+    // we expected a redirect back but got a normal fresh load instead — clear the stale flag
+    localStorage.removeItem('odConnecting');
   }
 });
 
