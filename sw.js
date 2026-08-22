@@ -1,5 +1,5 @@
-const CACHE='saving-guard-v4';
-const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-180.png','./icon-512.png','./msal-browser.min.js'];
+const CACHE='saving-guard-v6';
+const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-180.png','./icon-512.png','./msal-browser.min.js','./lib/xlsx.full.min.js','./lib/chart.umd.js'];
 
 self.addEventListener('install', e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));

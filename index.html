@@ -12,6 +12,8 @@
 <meta name="apple-mobile-web-app-title" content="ArthSetu">
 <link rel="apple-touch-icon" href="icon-180.png">
 <script src="./msal-browser.min.js" defer></script>
+<script src="./lib/xlsx.full.min.js" defer></script>
+<script src="./lib/chart.umd.js" defer></script>
 <style>
 /* ===== Design tokens ===== */
 :root{
@@ -200,32 +202,113 @@ body{
         <button class="btn secondary" onclick="addTravel('Bike')">🏍️ Bike · ₹221</button>
       </div>
     </div>
+
+    <div class="group-label eyebrow">Spending by category · this month</div>
+    <div class="group" style="padding:16px"><canvas id="chartCategory" height="220"></canvas></div>
+
+    <div class="group-label eyebrow">Spending by payment source · this month</div>
+    <div class="group" style="padding:16px"><canvas id="chartPaymentSource" height="200"></canvas></div>
+
+    <div class="group-label eyebrow">Expense trend · last 6 months</div>
+    <div class="group" style="padding:16px"><canvas id="chartTrend" height="200"></canvas></div>
   </div>
 </section>
 
 <!-- ===================== ADD ===================== -->
 <section id="screen-add" class="screen">
-  <div class="navbar" data-nav="add"><div class="row"><div><div class="large-title">Add expense</div></div></div></div>
+  <div class="navbar" data-nav="add"><div class="row"><div><div class="large-title">Add transaction</div></div></div></div>
   <div style="padding-top:16px">
     <form id="addForm" onsubmit="addExpense(event)">
       <div class="group">
-        <div class="field"><label>Date</label><input id="date" type="date" required></div>
-        <div class="field"><label>Amount (₹)</label><input id="amount" type="number" min="1" step="1" inputmode="numeric" placeholder="0" required></div>
-        <div class="field"><label>Category</label>
-          <select id="category">
-            <option>Food</option><option>Grocery</option><option>Travel</option><option>Personal</option>
-            <option>Family</option><option>Medical</option><option>Miscellaneous</option>
+        <div class="field"><label>Transaction type</label>
+          <select id="transactionType" onchange="onTypeChange()">
+            <option>Expense</option><option>Income</option><option>Transfer</option>
+            <option>Refund</option><option>Investment</option><option>Credit Card Payment</option>
           </select>
         </div>
-        <div class="field"><label>Payment mode</label>
-          <select id="mode"><option>UPI</option><option>Cash</option><option>Card</option><option>Bank</option></select>
-        </div>
-        <div class="field"><label>Note (optional)</label><input id="note" placeholder="e.g. Milk, sabzi"></div>
+        <div class="field"><label>Date</label><input id="date" type="date" required></div>
+        <div class="field"><label>Amount (₹)</label><input id="amount" type="number" min="1" step="1" inputmode="numeric" placeholder="0" required></div>
       </div>
-      <div class="stack"><button class="btn primary" type="submit">Save expense</button></div>
+
+      <div class="group-label eyebrow" id="categoryGroupLabel">Category</div>
+      <div class="group" id="categoryGroup">
+        <div class="field"><label>Category</label>
+          <select id="category" onchange="onCategoryChange()"></select>
+        </div>
+        <div class="field"><label>Subcategory</label>
+          <select id="subcategory"></select>
+        </div>
+        <div class="field"><label>Merchant / Vendor (optional)</label>
+          <input id="merchant" list="merchantList" placeholder="e.g. Mother Dairy, Amazon">
+          <datalist id="merchantList"></datalist>
+        </div>
+      </div>
+
+      <div class="group-label eyebrow">Payment</div>
+      <div class="group">
+        <div class="field"><label>Payment type</label>
+          <select id="paymentType" onchange="onPaymentTypeChange()">
+            <option>UPI</option><option>Card</option><option>Cash</option><option>Bank Transfer</option><option>Other</option>
+          </select>
+        </div>
+        <div class="field" id="paymentSourceField"><label>Payment source</label>
+          <select id="paymentSource"></select>
+        </div>
+        <div class="field"><label>UTR / Transaction ID (optional)</label>
+          <input id="utr" placeholder="If you have it — helps avoid duplicates later"></div>
+      </div>
+
+      <div class="group-label eyebrow">Note</div>
+      <div class="group">
+        <div class="field"><input id="note" placeholder="e.g. Milk, sabzi"></div>
+      </div>
+
+      <div class="stack"><button class="btn primary" type="submit">Save transaction</button></div>
     </form>
   </div>
 </section>
+
+<!-- ===================== CARDS ===================== -->
+<section id="screen-cards" class="screen">
+  <div class="navbar" data-nav="cards"><div class="row"><div><div class="large-title">Cards</div></div></div></div>
+  <div style="padding-top:16px">
+    <div class="stack" style="margin-top:0">
+      <button class="btn secondary" onclick="openCardForm()">➕ Add / update card</button>
+    </div>
+    <div class="group-label eyebrow">Your cards</div>
+    <div id="cardsList"></div>
+    <div class="footnote" style="margin:12px 6px 0">Utilization = Outstanding ÷ Credit Limit × 100. No fixed percentage guarantees a particular credit-score outcome — this is just for your own tracking.</div>
+  </div>
+</section>
+
+<div id="cardFormWrap" class="hide" style="position:fixed; inset:0; z-index:60; background:color-mix(in srgb, var(--ink) 40%, transparent); display:flex; align-items:flex-end">
+  <div style="background:var(--paper); width:100%; max-height:88vh; overflow:auto; border-radius:20px 20px 0 0; padding:14px 0 calc(20px + env(safe-area-inset-bottom))">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 16px 10px">
+      <div class="headline" id="cardFormTitle">Add card</div>
+      <button class="link-btn" onclick="closeCardForm()">Close</button>
+    </div>
+    <div class="group" style="margin:0 16px; width:calc(100% - 32px)">
+      <div class="field"><label>Card</label>
+        <select id="cf_name">
+          <option>SBI SimplyCLICK Visa</option>
+          <option>Tata Neu Infinity SBI Card</option>
+          <option>Other (type below)</option>
+        </select>
+      </div>
+      <div class="field"><label>Custom name (if "Other" selected)</label><input id="cf_customName" placeholder="Card name"></div>
+      <div class="field"><label>Credit limit (₹)</label><input id="cf_limit" type="number" inputmode="numeric"></div>
+      <div class="field"><label>Current outstanding (₹)</label><input id="cf_outstanding" type="number" inputmode="numeric"></div>
+      <div class="field"><label>Minimum amount due (₹)</label><input id="cf_minDue" type="number" inputmode="numeric"></div>
+      <div class="field"><label>Total amount due (₹)</label><input id="cf_totalDue" type="number" inputmode="numeric"></div>
+      <div class="field"><label>Statement date</label><input id="cf_statementDate" type="date"></div>
+      <div class="field"><label>Payment due date</label><input id="cf_dueDate" type="date"></div>
+    </div>
+    <div class="stack" style="margin:14px 16px 0">
+      <button class="btn primary" onclick="saveCardForm()">Save card</button>
+      <button class="btn ghost hide" id="cf_deleteBtn" onclick="deleteCardForm()">Delete card</button>
+    </div>
+  </div>
+</div>
 
 <!-- ===================== HISTORY ===================== -->
 <section id="screen-history" class="screen">
@@ -260,6 +343,7 @@ body{
 
     <div class="group-label eyebrow">Backup</div>
     <div class="stack" style="margin-top:0">
+      <button class="btn secondary" onclick="exportExcel()">📊 Export Excel (.xlsx)</button>
       <button class="btn secondary" onclick="exportData()">⬆️ Export backup (JSON)</button>
       <button class="btn secondary" onclick="document.getElementById('importFile').click()">⬇️ Import backup</button>
       <input id="importFile" type="file" accept="application/json" style="display:none" onchange="importData(event)">
@@ -285,6 +369,7 @@ body{
 <div class="tabbar">
   <button class="tab active" data-tab="home" onclick="go('home')"><span class="ic">🛡️</span>Guard</button>
   <button class="tab" data-tab="add" onclick="go('add')"><span class="ic">➕</span>Add</button>
+  <button class="tab" data-tab="cards" onclick="go('cards')"><span class="ic">💳</span>Cards</button>
   <button class="tab" data-tab="history" onclick="go('history')"><span class="ic">📋</span>History</button>
   <button class="tab" data-tab="settings" onclick="go('settings')"><span class="ic">⚙️</span>Settings</button>
 </div>
@@ -292,7 +377,8 @@ body{
 <div id="toast" class="toast"></div>
 
 <script>
-const APP_VERSION='v3.0';
+const APP_VERSION='v4.0';
+const SCHEMA_VERSION=2;
 const CFG={
  salary:62000,target:25000,
  fixed:[
@@ -301,14 +387,91 @@ const CFG={
   ["Health Insurance",1345],["Life Cover – Self",1099],["Life Cover – Spouse",599],
   ["WiFi Kadana",471],["Airtel Postpaid",825],["Mummy ji recharge",700],["Daughter fee",3100]
  ],
- bus:100,bike:221
+ bus:100,bike:221,
+ cards:{ // name -> credit limit (editable in Settings)
+   "SBI SimplyCLICK Visa": 0,
+   "Tata Neu Infinity SBI Card": 0
+ }
 };
+
+// Vegetarian-only categories, per user's stated requirement.
+const CATEGORIES={
+  Food:["Tea/Coffee","Breakfast","Lunch/Dinner","Snacks","Restaurant","Alcohol","Other Food"],
+  Grocery:["Milk","Curd","Rice","Atta","Dal","Oil","Sugar","Tomatoes","Sabziyan","Fruits","Bread","Spices","Dry Fruits","Other Grocery"],
+  Travel:["Bus","Bike","Auto","Other Travel"],
+  Personal:["Other Personal"],
+  Family:["Other Family"],
+  Medical:["Other Medical"],
+  Miscellaneous:["Other"]
+};
+
+// Payment sources: Tata Neu UPI included, PhonePe/WhatsApp Pay intentionally excluded per user's stated apps.
+const PAYMENT_SOURCES={
+  "UPI":["Tata Neu UPI","Google Pay","Paytm","BHIM","Amazon Pay","Other UPI"],
+  "Card":["SBI SimplyCLICK Visa","Tata Neu Infinity SBI Card"],
+  "Cash":["Cash"],
+  "Bank Transfer":["SBI","ICICI Bank","HDFC Bank","Axis Bank","PNB","Other Bank"],
+  "Other":["Other"]
+};
+
+const TXN_TYPES=["Expense","Income","Transfer","Refund","Investment","Credit Card Payment"];
+const SPEND_TYPES=new Set(["Expense","Refund"]); // Refund is spend-reducing, not spend-adding — see spendDelta()
+
 const KEY='savingGuardExpenses', SALARY_KEY='savingGuardSalary', BACKUP_KEY='savingGuardLastBackup';
 let expenses=[];
+
+function uid(){ return 'txn_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8); }
+
+function normalizeMerchant(m){
+  return (m||'').trim().toLowerCase().replace(/\s+/g,' ');
+}
+function computeFingerprint(e){
+  return [e.date, Math.round(e.amount), e.transactionType, e.paymentSource||'', normalizeMerchant(e.merchant)].join('|');
+}
+
+// Backward-compatible migration: adds new fields to old-format records without touching/removing
+// anything that's already there. Never deletes a record for missing fields (per requirement).
+function migrateExpenses(){
+  const ver=Number(localStorage.getItem('savingGuardSchemaVersion')||'1');
+  if(ver>=SCHEMA_VERSION) return;
+  expenses=expenses.map(e=>{
+    if(e.id && e.transactionType) return e; // already migrated
+    const createdAt = e.ts ? new Date(e.ts).toISOString() : (e.date ? e.date+'T00:00:00.000Z' : new Date().toISOString());
+    let paymentType = e.mode || 'Other';
+    if(paymentType==='Bank') paymentType='Bank Transfer';
+    if(!TXN_TYPES.includes(paymentType)) { /* mode was never a txn type, ignore */ }
+    const migrated = {
+      ...e, // preserve every original field (e.g. legacy `mode`, `ts`) even though superseded below —
+             // "never delete old records because new fields are missing" per requirement
+      id: e.id || uid(),
+      date: e.date, time: e.time || null,
+      amount: e.amount,
+      transactionType: e.transactionType || 'Expense',
+      category: e.category || 'Miscellaneous',
+      subcategory: e.subcategory || '',
+      merchant: e.merchant || '',
+      paymentType: ['UPI','Card','Cash','Bank Transfer','Other'].includes(paymentType) ? paymentType : 'Other',
+      paymentSource: e.paymentSource || '',
+      utr: e.utr || '',
+      transactionReference: e.transactionReference || '',
+      note: e.note || '',
+      importSource: e.importSource || 'legacy-migrated',
+      reconciliationStatus: e.reconciliationStatus || 'Unmatched',
+      attachmentIds: e.attachmentIds || [],
+      createdAt: e.createdAt || createdAt,
+      updatedAt: e.updatedAt || createdAt
+    };
+    migrated.fingerprint = computeFingerprint(migrated);
+    return migrated;
+  });
+  localStorage.setItem('savingGuardSchemaVersion', String(SCHEMA_VERSION));
+  persist();
+}
 
 function loadExpenses(){
   try{ expenses=JSON.parse(localStorage.getItem(KEY)||'[]'); }
   catch(e){ expenses=[]; }
+  migrateExpenses();
 }
 function persist(){
   localStorage.setItem(KEY, JSON.stringify(expenses));
@@ -319,11 +482,211 @@ function persist(){
   return ok;
 }
 
+function spendDelta(e){
+  if(!SPEND_TYPES.has(e.transactionType)) return 0;
+  return e.transactionType==='Refund' ? -e.amount : e.amount;
+}
+
+/* ===== Credit Cards (manual entry — statement import comes in a later phase) ===== */
+const CARDS_KEY='savingGuardCards';
+let cardsList=[];
+function loadCards(){
+  try{ cardsList=JSON.parse(localStorage.getItem(CARDS_KEY)||'[]'); }
+  catch(e){ cardsList=[]; }
+}
+function persistCards(){ localStorage.setItem(CARDS_KEY, JSON.stringify(cardsList)); }
+
+function cardStatus(pct){
+  if(pct<30) return {label:'Healthy', cls:'safe'};
+  if(pct<60) return {label:'Watch', cls:'caution'};
+  return {label:'High', cls:'danger'};
+}
+
+function renderCards(){
+  const wrap=document.getElementById('cardsList');
+  if(!wrap) return;
+  if(!cardsList.length){ wrap.innerHTML='<div class="group"><div class="empty">No cards added yet.</div></div>'; return; }
+  wrap.innerHTML = cardsList.map((c,i)=>{
+    const limit=Number(c.limit)||0, outstanding=Number(c.outstanding)||0;
+    const pct = limit>0 ? Math.min(100, Math.round((outstanding/limit)*100)) : 0;
+    const st = cardStatus(pct);
+    const dueLine = c.dueDate ? `Due ${new Date(c.dueDate).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}` : 'Due date not set';
+    return `
+    <div class="group" style="margin-bottom:12px">
+      <div class="cell tap" onclick="openCardForm(${i})">
+        <div>
+          <div class="headline">${escapeHtml(c.name)}</div>
+          <div class="footnote" style="margin-top:2px">${money(outstanding)} of ${money(limit)} used · ${dueLine}</div>
+        </div>
+        <span class="pill ${st.cls}" style="margin:0">${pct}% ${st.label}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+let editingCardIndex=null;
+function openCardForm(index){
+  editingCardIndex = (typeof index==='number') ? index : null;
+  const c = editingCardIndex!==null ? cardsList[editingCardIndex] : {name:'SBI SimplyCLICK Visa',limit:'',outstanding:'',minDue:'',totalDue:'',statementDate:'',dueDate:''};
+  document.getElementById('cardFormTitle').textContent = editingCardIndex!==null ? 'Edit card' : 'Add card';
+  const knownNames=['SBI SimplyCLICK Visa','Tata Neu Infinity SBI Card'];
+  cf_name.value = knownNames.includes(c.name) ? c.name : 'Other (type below)';
+  cf_customName.value = knownNames.includes(c.name) ? '' : (c.name||'');
+  cf_limit.value=c.limit||''; cf_outstanding.value=c.outstanding||'';
+  cf_minDue.value=c.minDue||''; cf_totalDue.value=c.totalDue||'';
+  cf_statementDate.value=c.statementDate||''; cf_dueDate.value=c.dueDate||'';
+  document.getElementById('cf_deleteBtn').classList.toggle('hide', editingCardIndex===null);
+  document.getElementById('cardFormWrap').classList.remove('hide');
+}
+function closeCardForm(){ document.getElementById('cardFormWrap').classList.add('hide'); editingCardIndex=null; }
+function saveCardForm(){
+  const name = cf_name.value==='Other (type below)' ? cf_customName.value.trim() : cf_name.value;
+  if(!name){ toast('⚠️ Card name required'); return; }
+  const card={ name, limit:+cf_limit.value||0, outstanding:+cf_outstanding.value||0,
+    minDue:+cf_minDue.value||0, totalDue:+cf_totalDue.value||0,
+    statementDate: cf_statementDate.value||'', dueDate: cf_dueDate.value||'' };
+  if(editingCardIndex!==null) cardsList[editingCardIndex]=card; else cardsList.push(card);
+  persistCards(); renderCards(); closeCardForm();
+  toast('Card saved');
+}
+function deleteCardForm(){
+  if(editingCardIndex===null) return;
+  if(confirm('Delete this card?')){ cardsList.splice(editingCardIndex,1); persistCards(); renderCards(); closeCardForm(); toast('Card deleted'); }
+}
+
+/* ===== Excel export (SheetJS, self-hosted) =====
+   Sheets included only for data that actually exists today. Investments/Attachments/Reconciliation
+   sheets will be added once those phases are implemented — an empty placeholder sheet would be
+   misleading, not useful. */
+function exportExcel(){
+  if(typeof XLSX==='undefined'){ toast('⚠️ Excel library did not load — try again in a moment',4000); return; }
+  const wb=XLSX.utils.book_new();
+
+  // Sheet 1: Transactions
+  const txnRows=expenses.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(e=>({
+    'Transaction ID':e.id, 'Date':e.date, 'Time':e.time||'', 'Type':e.transactionType,
+    'Category':e.category||'', 'Subcategory':e.subcategory||'', 'Merchant':e.merchant||'',
+    'Amount':e.amount, 'Payment Type':e.paymentType||'', 'Payment Source':e.paymentSource||'',
+    'UTR':e.utr||'', 'Transaction Reference':e.transactionReference||'', 'Import Source':e.importSource||'',
+    'Reconciliation Status':e.reconciliationStatus||'', 'Attachment Count':(e.attachmentIds||[]).length,
+    'Note':e.note||'', 'Created At':e.createdAt||'', 'Updated At':e.updatedAt||''
+  }));
+  const ws1=XLSX.utils.json_to_sheet(txnRows);
+  ws1['!cols']=[{wch:20},{wch:11},{wch:8},{wch:10},{wch:12},{wch:14},{wch:18},{wch:10},{wch:12},{wch:20},{wch:16},{wch:16},{wch:14},{wch:16},{wch:8},{wch:24},{wch:20},{wch:20}];
+  ws1['!freeze']={xSplit:0,ySplit:1}; ws1['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:Math.max(1,txnRows.length),c:17}})};
+  XLSX.utils.book_append_sheet(wb, ws1, 'Transactions');
+
+  // Sheet 2: Monthly Summary
+  const byMonth={};
+  expenses.forEach(e=>{
+    const key=e.date.slice(0,7);
+    byMonth[key]=byMonth[key]||{Income:0,Expenses:0,Investments:0,Transfers:0,Refunds:0,'Credit Card Payments':0};
+    const amt=e.amount;
+    if(e.transactionType==='Expense') byMonth[key].Expenses+=amt;
+    else if(e.transactionType==='Income') byMonth[key].Income+=amt;
+    else if(e.transactionType==='Investment') byMonth[key].Investments+=amt;
+    else if(e.transactionType==='Transfer') byMonth[key].Transfers+=amt;
+    else if(e.transactionType==='Refund') byMonth[key].Refunds+=amt;
+    else if(e.transactionType==='Credit Card Payment') byMonth[key]['Credit Card Payments']+=amt;
+  });
+  const monthRows=Object.keys(byMonth).sort().map(m=>{
+    const r=byMonth[m];
+    const netExpense=r.Expenses-r.Refunds;
+    return {'Month':m,'Income':r.Income,'Expenses':r.Expenses,'Investments':r.Investments,'Transfers':r.Transfers,
+      'Refunds':r.Refunds,'Credit Card Payments':r['Credit Card Payments'],
+      'Projected Savings':CFG.salary-CFG.fixed.reduce((a,x)=>a+x[1],0)-CFG.target,
+      'Actual Savings':CFG.salary-CFG.fixed.reduce((a,x)=>a+x[1],0)-netExpense};
+  });
+  const ws2=XLSX.utils.json_to_sheet(monthRows);
+  ws2['!cols']=[{wch:10},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:18},{wch:16},{wch:14}];
+  ws2['!freeze']={xSplit:0,ySplit:1};
+  XLSX.utils.book_append_sheet(wb, ws2, 'Monthly Summary');
+
+  // Sheet 3: Credit Cards
+  const cardRows=cardsList.map(c=>{
+    const pct=c.limit>0?Math.round((c.outstanding/c.limit)*100):0;
+    return {'Card':c.name,'Credit Limit':c.limit,'Outstanding':c.outstanding,'Available Limit':c.limit-c.outstanding,
+      'Utilization %':pct,'Statement Date':c.statementDate,'Due Date':c.dueDate,'Minimum Due':c.minDue,'Total Due':c.totalDue};
+  });
+  const ws3=XLSX.utils.json_to_sheet(cardRows);
+  ws3['!cols']=[{wch:26},{wch:13},{wch:13},{wch:15},{wch:13},{wch:13},{wch:11},{wch:13},{wch:11}];
+  ws3['!freeze']={xSplit:0,ySplit:1};
+  XLSX.utils.book_append_sheet(wb, ws3, 'Credit Cards');
+
+  // Sheet 4: Fixed Expenses
+  const fixedRows=CFG.fixed.map(x=>({'Expense':x[0],'Amount':x[1],'Frequency':'Monthly','Category':'Fixed'}));
+  const ws4=XLSX.utils.json_to_sheet(fixedRows);
+  ws4['!cols']=[{wch:24},{wch:11},{wch:11},{wch:11}];
+  XLSX.utils.book_append_sheet(wb, ws4, 'Fixed Expenses');
+
+  // Sheet 5: Payment Sources
+  const psRows=[];
+  Object.keys(PAYMENT_SOURCES).forEach(type=>PAYMENT_SOURCES[type].forEach(src=>psRows.push({'Payment Type':type,'Payment Source':src,'Status':'Active'})));
+  const ws5=XLSX.utils.json_to_sheet(psRows);
+  ws5['!cols']=[{wch:16},{wch:24},{wch:10}];
+  XLSX.utils.book_append_sheet(wb, ws5, 'Payment Sources');
+
+  const fname=`ArthSetu_Complete_Backup_${todayISO()}.xlsx`;
+  XLSX.writeFile(wb, fname);
+  toast('Excel exported: '+fname, 3000);
+}
+
 const money=n=>'₹'+Math.round(n).toLocaleString('en-IN');
 const todayISO=()=>new Date().toISOString().slice(0,10);
 document.getElementById('date').value=todayISO();
 document.getElementById('dateLine').textContent=new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'});
 document.getElementById('verLine').textContent=APP_VERSION;
+
+/* ===== Dashboard charts (Chart.js, self-hosted) ===== */
+let _charts={};
+function destroyChart(id){ if(_charts[id]){ _charts[id].destroy(); delete _charts[id]; } }
+const CHART_PALETTE=['#2E7D6B','#4FBBA3','#B8860B','#D0342C','#3A3A3C','#8A8A8E','#63CBB4','#E8B84B'];
+
+function renderDashboardCharts(){
+  if(typeof Chart==='undefined') return; // library still loading (defer) — retried after boot below
+  const me=monthExpenses().filter(e=>e.transactionType==='Expense');
+  const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const fg = isDark ? '#F2F2F7' : '#1C1C1E';
+  Chart.defaults.color = fg;
+  Chart.defaults.font.family = "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif";
+
+  // Category donut
+  const byCat={};
+  me.forEach(e=>{ byCat[e.category||'Miscellaneous']=(byCat[e.category||'Miscellaneous']||0)+e.amount; });
+  const catLabels=Object.keys(byCat), catData=catLabels.map(k=>byCat[k]);
+  destroyChart('cat');
+  _charts.cat = new Chart(document.getElementById('chartCategory'), {
+    type:'doughnut',
+    data:{ labels: catLabels.length?catLabels:['No data'], datasets:[{ data: catData.length?catData:[1], backgroundColor: CHART_PALETTE, borderWidth:0 }] },
+    options:{ plugins:{ legend:{ position:'bottom', labels:{boxWidth:10,padding:12} },
+      tooltip:{ callbacks:{ label: ctx => catData.length ? `${ctx.label}: ${money(ctx.parsed)}` : 'No expenses yet this month' } } } }
+  });
+
+  // Payment source bar
+  const byPs={};
+  me.forEach(e=>{ const k=e.paymentSource||e.paymentType||'Other'; byPs[k]=(byPs[k]||0)+e.amount; });
+  const psLabels=Object.keys(byPs), psData=psLabels.map(k=>byPs[k]);
+  destroyChart('ps');
+  _charts.ps = new Chart(document.getElementById('chartPaymentSource'), {
+    type:'bar',
+    data:{ labels: psLabels.length?psLabels:['No data'], datasets:[{ data: psData.length?psData:[0], backgroundColor:'#2E7D6B', borderRadius:6 }] },
+    options:{ indexAxis:'y', plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => money(ctx.parsed.x) } } },
+      scales:{ x:{ ticks:{ callback: v=>'₹'+v }, grid:{color: isDark?'rgba(255,255,255,.08)':'rgba(0,0,0,.06)'} }, y:{ grid:{display:false} } } }
+  });
+
+  // 6-month expense trend
+  const now=new Date(), months=[];
+  for(let i=5;i>=0;i--){ const d=new Date(now.getFullYear(),now.getMonth()-i,1); months.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')); }
+  const monthTotals=months.map(key=>expenses.filter(e=>e.transactionType==='Expense' && e.date.slice(0,7)===key).reduce((a,e)=>a+e.amount,0));
+  const monthLabels=months.map(k=>{ const [y,m]=k.split('-'); return new Date(y,m-1,1).toLocaleDateString('en-IN',{month:'short'}); });
+  destroyChart('trend');
+  _charts.trend = new Chart(document.getElementById('chartTrend'), {
+    type:'line',
+    data:{ labels: monthLabels, datasets:[{ data: monthTotals, borderColor:'#2E7D6B', backgroundColor:'rgba(46,125,107,0.12)', fill:true, tension:.35, pointRadius:3 }] },
+    options:{ plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => money(ctx.parsed.y) } } },
+      scales:{ y:{ ticks:{ callback: v=>'₹'+v }, grid:{color: isDark?'rgba(255,255,255,.08)':'rgba(0,0,0,.06)'} }, x:{ grid:{display:false} } } }
+  });
+}
 
 function monthRange(){
  const now=new Date(), y=now.getFullYear(), m=now.getMonth();
@@ -339,7 +702,7 @@ function variableBudget(){return CFG.salary-CFG.fixed.reduce((a,x)=>a+x[1],0)-CF
 const RING_C = 2*Math.PI*78;
 
 function recalc(){
- const me=monthExpenses(), spent=me.reduce((a,e)=>a+e.amount,0), vb=variableBudget();
+ const me=monthExpenses(), spent=me.reduce((a,e)=>a+spendDelta(e),0), vb=variableBudget();
  const {days,today}=monthRange(), remainingDays=Math.max(1,days-today+1);
  const remaining=Math.max(0,vb-spent);
  const daily=remaining/remainingDays;
@@ -352,7 +715,7 @@ function recalc(){
  document.getElementById('spent').textContent=money(spent);
  document.getElementById('expectedSaving').textContent=money(expectedSaving);
  document.getElementById('todayBudget').textContent=money(daily)+'/day';
- const ts=me.filter(e=>e.date===todayISO()).reduce((a,e)=>a+e.amount,0);
+ const ts=me.filter(e=>e.date===todayISO()).reduce((a,e)=>a+spendDelta(e),0);
  document.getElementById('todaySpent').textContent=money(ts);
  document.getElementById('todayRemaining').textContent=money(Math.max(0,daily-ts));
 
@@ -373,16 +736,23 @@ function recalc(){
 
  renderHistory(me);
  renderSettingsStats();
+ renderDashboardCharts();
 }
 
+const TXN_ICON={Expense:'',Income:'💰',Transfer:'↔️',Refund:'↩️',Investment:'📈','Credit Card Payment':'💳'};
 function renderHistory(me){
- const sorted=me.slice().sort((a,b)=>b.date.localeCompare(a.date)||(b.ts||0)-(a.ts||0));
+ const sorted=me.slice().sort((a,b)=>b.date.localeCompare(a.date)||(new Date(b.createdAt||0)-new Date(a.createdAt||0)));
  document.getElementById('histCount').textContent=sorted.length;
- document.getElementById('historyList').innerHTML = sorted.length ? sorted.map(e=>`
+ document.getElementById('historyList').innerHTML = sorted.length ? sorted.map(e=>{
+   const title=[e.merchant, e.category, e.subcategory].filter(Boolean).join(' · ') || e.category || 'Miscellaneous';
+   const sub=[e.date.slice(5), e.paymentSource||e.paymentType, e.note].filter(Boolean).join(' · ');
+   const sign = e.transactionType==='Refund' ? '−' : (e.transactionType==='Income' ? '+' : '');
+   return `
    <div class="list-row">
-     <div><div>${e.category}${e.note?' · '+escapeHtml(e.note):''}</div><div class="meta">${e.date.slice(5)} · ${e.mode||''}</div></div>
-     <div class="amt">${money(e.amount)}</div>
-   </div>`).join('') : `<div class="empty">No expenses yet this month.</div>`;
+     <div><div>${TXN_ICON[e.transactionType]||''} ${escapeHtml(title)}</div><div class="meta">${escapeHtml(sub)}</div></div>
+     <div class="amt">${sign}${money(e.amount)}</div>
+   </div>`;
+ }).join('') : `<div class="empty">No transactions yet this month.</div>`;
 }
 function escapeHtml(s){return s.replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
 
@@ -394,20 +764,77 @@ function renderSettingsStats(){
  document.getElementById('lastBackup').textContent = lb ? new Date(lb).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) : 'Never';
 }
 
+function makeTxn(fields){
+  const now=new Date().toISOString();
+  const t={
+    id: uid(), date: fields.date, time: fields.time || null,
+    amount: fields.amount, transactionType: fields.transactionType || 'Expense',
+    category: fields.category || '', subcategory: fields.subcategory || '',
+    merchant: fields.merchant || '', paymentType: fields.paymentType || 'Other',
+    paymentSource: fields.paymentSource || '', utr: fields.utr || '',
+    transactionReference: fields.transactionReference || '', note: fields.note || '',
+    importSource: fields.importSource || 'manual', reconciliationStatus: 'Unmatched',
+    attachmentIds: [], createdAt: now, updatedAt: now
+  };
+  t.fingerprint = computeFingerprint(t);
+  return t;
+}
+
+function onTypeChange(){
+  const t=transactionType.value;
+  const isSpendLike = t==='Expense' || t==='Refund';
+  document.getElementById('categoryGroup').classList.toggle('hide', !isSpendLike);
+  document.getElementById('categoryGroupLabel').classList.toggle('hide', !isSpendLike);
+}
+function populateCategorySelect(){
+  category.innerHTML = Object.keys(CATEGORIES).map(c=>`<option>${c}</option>`).join('');
+  onCategoryChange();
+}
+function onCategoryChange(){
+  const subs=CATEGORIES[category.value]||[];
+  subcategory.innerHTML = subs.map(s=>`<option>${s}</option>`).join('');
+}
+function populatePaymentTypeOptions(){ onPaymentTypeChange(); }
+function onPaymentTypeChange(){
+  const t=paymentType.value;
+  const sources = t==='Card'
+    ? Object.keys(CFG.cards).length ? Object.keys(CFG.cards) : PAYMENT_SOURCES.Card
+    : (PAYMENT_SOURCES[t] || ['Other']);
+  paymentSource.innerHTML = sources.map(s=>`<option>${s}</option>`).join('');
+  document.getElementById('paymentSourceField').classList.toggle('hide', t==='Cash');
+}
+function updateMerchantList(){
+  const names=[...new Set(expenses.map(e=>e.merchant).filter(Boolean))].sort();
+  document.getElementById('merchantList').innerHTML = names.map(n=>`<option value="${escapeHtml(n)}">`).join('');
+}
+
 function addExpense(ev){
  ev.preventDefault();
  const amt=+amount.value;
  if(!amt || amt<=0) return;
- expenses.push({date:date.value,amount:amt,category:category.value,mode:mode.value,note:note.value,ts:Date.now()});
+ const isSpendLike = transactionType.value==='Expense' || transactionType.value==='Refund';
+ const txn=makeTxn({
+   date: date.value, amount: amt, transactionType: transactionType.value,
+   category: isSpendLike ? category.value : '', subcategory: isSpendLike ? subcategory.value : '',
+   merchant: merchant.value.trim(), paymentType: paymentType.value, paymentSource: paymentSource.value,
+   utr: utr.value.trim(), note: note.value.trim()
+ });
+ expenses.push(txn);
  const ok=persist();
+ updateMerchantList();
  ev.target.reset(); date.value=todayISO();
+ populateCategorySelect(); onPaymentTypeChange(); onTypeChange();
  recalc();
  toast(ok?`✓ Saved — ${expenses.length} entries stored`:'⚠️ Save may have failed — check storage');
  odAutoSyncIfConnected();
  go('home');
 }
 function addTravel(type){
- expenses.push({date:todayISO(),amount:type==='Bus'?CFG.bus:CFG.bike,category:'Travel',mode:'Auto',note:type,ts:Date.now()});
+ const txn=makeTxn({
+   date:todayISO(), amount:type==='Bus'?CFG.bus:CFG.bike, transactionType:'Expense',
+   category:'Travel', subcategory:type, paymentType:'Other', note:type, importSource:'quick-travel'
+ });
+ expenses.push(txn);
  const ok=persist();
  recalc();
  toast(ok?`✓ Saved — ${expenses.length} entries stored`:'⚠️ Save may have failed');
@@ -573,9 +1000,15 @@ function hideInstall(){document.getElementById('installBanner').classList.add('h
 
 /* ===== Boot ===== */
 loadExpenses();
+loadCards();
 const savedSalary=Number(localStorage.getItem(SALARY_KEY));
 if(savedSalary>0) CFG.salary=savedSalary;
 document.getElementById('fixedList').innerHTML=CFG.fixed.map(x=>`<div class="cell"><span class="l">${x[0]}</span><span class="r">${money(x[1])}</span></div>`).join('');
+populateCategorySelect();
+onPaymentTypeChange();
+onTypeChange();
+updateMerchantList();
+renderCards();
 recalc();
 
 if(/iPhone|iPad|iPod/i.test(navigator.userAgent) && !window.navigator.standalone){
@@ -585,6 +1018,7 @@ if(/iPhone|iPad|iPod/i.test(navigator.userAgent) && !window.navigator.standalone
 // Restore OneDrive connection state on load (msal script loads with `defer`, so wait for it)
 // Also completes the redirect-based login flow when we're coming back from Microsoft's login page.
 window.addEventListener('load', async ()=>{
+  renderDashboardCharts(); // Chart.js loads via `defer`, so retry now that it's definitely available
   if(!odConfigured() || typeof msal==='undefined'){ updateOdUI(false); return; }
   const app=initMsal();
   try{
