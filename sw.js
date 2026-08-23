@@ -1,4 +1,4 @@
-const CACHE='saving-guard-v6';
+const CACHE='saving-guard-v7';
 const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-180.png','./icon-512.png','./msal-browser.min.js','./lib/xlsx.full.min.js','./lib/chart.umd.js'];
 
 self.addEventListener('install', e=>{

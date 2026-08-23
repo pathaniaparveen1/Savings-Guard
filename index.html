@@ -12,8 +12,17 @@
 <meta name="apple-mobile-web-app-title" content="ArthSetu">
 <link rel="apple-touch-icon" href="icon-180.png">
 <script src="./msal-browser.min.js" defer></script>
-<script src="./lib/xlsx.full.min.js" defer></script>
-<script src="./lib/chart.umd.js" defer></script>
+<script>
+  // Track load success/failure per library with the EXACT path, so failures are diagnosable
+  // instead of a generic "didn't load" message. Populated by onload/onerror below.
+  window.__libStatus = { xlsx: 'loading', chart: 'loading', xlsxPath: './lib/xlsx.full.min.js', chartPath: './lib/chart.umd.js' };
+</script>
+<script src="./lib/xlsx.full.min.js" defer
+  onload="window.__libStatus.xlsx='loaded'"
+  onerror="window.__libStatus.xlsx='error'"></script>
+<script src="./lib/chart.umd.js" defer
+  onload="window.__libStatus.chart='loaded'"
+  onerror="window.__libStatus.chart='error'"></script>
 <style>
 /* ===== Design tokens ===== */
 :root{
@@ -343,7 +352,7 @@ body{
 
     <div class="group-label eyebrow">Backup</div>
     <div class="stack" style="margin-top:0">
-      <button class="btn secondary" onclick="exportExcel()">📊 Export Excel (.xlsx)</button>
+      <button class="btn secondary" id="exportExcelBtn" onclick="exportExcel()" disabled>⏳ Loading Excel library…</button>
       <button class="btn secondary" onclick="exportData()">⬆️ Export backup (JSON)</button>
       <button class="btn secondary" onclick="document.getElementById('importFile').click()">⬇️ Import backup</button>
       <input id="importFile" type="file" accept="application/json" style="display:none" onchange="importData(event)">
@@ -558,8 +567,36 @@ function deleteCardForm(){
    Sheets included only for data that actually exists today. Investments/Attachments/Reconciliation
    sheets will be added once those phases are implemented — an empty placeholder sheet would be
    misleading, not useful. */
-function exportExcel(){
-  if(typeof XLSX==='undefined'){ toast('⚠️ Excel library did not load — try again in a moment',4000); return; }
+function waitForXLSX(timeoutMs){
+  return new Promise((resolve,reject)=>{
+    if(typeof XLSX!=='undefined') return resolve();
+    if(window.__libStatus && window.__libStatus.xlsx==='error') return reject(new Error('load-error'));
+    const start=Date.now();
+    const iv=setInterval(()=>{
+      if(typeof XLSX!=='undefined'){ clearInterval(iv); resolve(); return; }
+      if(window.__libStatus && window.__libStatus.xlsx==='error'){ clearInterval(iv); reject(new Error('load-error')); return; }
+      if(Date.now()-start>timeoutMs){ clearInterval(iv); reject(new Error('timeout')); }
+    },150);
+  });
+}
+
+async function exportExcel(){
+  const btn=document.getElementById('exportExcelBtn');
+  const path=(window.__libStatus && window.__libStatus.xlsxPath) || './lib/xlsx.full.min.js';
+  if(typeof XLSX==='undefined'){
+    if(btn){ btn.disabled=true; btn.textContent='⏳ Loading Excel library…'; }
+    try{
+      await waitForXLSX(8000);
+    }catch(e){
+      const reason = e.message==='load-error'
+        ? `Failed to load Excel library from "${path}" — check that this exact file exists in your deployed repo (path + capitalization must match exactly).`
+        : `Excel library at "${path}" is taking too long to load — check your connection and try again.`;
+      toast('⚠️ '+reason, 6000);
+      if(btn){ btn.disabled=false; btn.textContent='📊 Export Excel (.xlsx)'; }
+      return;
+    }
+    if(btn){ btn.disabled=false; btn.textContent='📊 Export Excel (.xlsx)'; }
+  }
   const wb=XLSX.utils.book_new();
 
   // Sheet 1: Transactions
@@ -1019,6 +1056,22 @@ if(/iPhone|iPad|iPod/i.test(navigator.userAgent) && !window.navigator.standalone
 // Also completes the redirect-based login flow when we're coming back from Microsoft's login page.
 window.addEventListener('load', async ()=>{
   renderDashboardCharts(); // Chart.js loads via `defer`, so retry now that it's definitely available
+
+  // Enable/report the Excel export button based on actual load outcome (not a blind assumption)
+  const excelBtn=document.getElementById('exportExcelBtn');
+  if(excelBtn){
+    try{
+      await waitForXLSX(6000);
+      excelBtn.disabled=false; excelBtn.textContent='📊 Export Excel (.xlsx)';
+    }catch(e){
+      const path=(window.__libStatus && window.__libStatus.xlsxPath) || './lib/xlsx.full.min.js';
+      excelBtn.disabled=false; // let them retry manually — exportExcel() will re-check and report clearly
+      excelBtn.textContent='📊 Export Excel (.xlsx)';
+      if(e.message==='load-error'){
+        console.error('Excel library failed to load from', path);
+      }
+    }
+  }
   if(!odConfigured() || typeof msal==='undefined'){ updateOdUI(false); return; }
   const app=initMsal();
   try{
