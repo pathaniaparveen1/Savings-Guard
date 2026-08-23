@@ -15,7 +15,8 @@
 <script>
   // Track load success/failure per library with the EXACT path, so failures are diagnosable
   // instead of a generic "didn't load" message. Populated by onload/onerror below.
-  window.__libStatus = { xlsx: 'loading', chart: 'loading', xlsxPath: './lib/xlsx.full.min.js', chartPath: './lib/chart.umd.js' };
+  window.__libStatus = { xlsx: 'loading', chart: 'loading', tesseract: 'loading',
+    xlsxPath: './lib/xlsx.full.min.js', chartPath: './lib/chart.umd.js', tesseractPath: './lib/tesseract.min.js' };
 </script>
 <script src="./lib/xlsx.full.min.js" defer
   onload="window.__libStatus.xlsx='loaded'"
@@ -23,6 +24,9 @@
 <script src="./lib/chart.umd.js" defer
   onload="window.__libStatus.chart='loaded'"
   onerror="window.__libStatus.chart='error'"></script>
+<script src="./lib/tesseract.min.js" defer
+  onload="window.__libStatus.tesseract='loaded'"
+  onerror="window.__libStatus.tesseract='error'"></script>
 <style>
 /* ===== Design tokens ===== */
 :root{
@@ -139,6 +143,7 @@ body{
 
 /* ===== Misc ===== */
 .list-row{display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:0.5px solid var(--sep); gap:10px}
+.list-row.tap{cursor:pointer} .list-row.tap:active{background:color-mix(in srgb, var(--ink) 6%, transparent)}
 .list-row:last-child{border-bottom:none}
 .list-row .meta{font-size:12px; color:var(--muted); margin-top:2px}
 .list-row .amt{font-weight:700; font-size:15px; white-space:nowrap}
@@ -227,7 +232,21 @@ body{
 <section id="screen-add" class="screen">
   <div class="navbar" data-nav="add"><div class="row"><div><div class="large-title">Add transaction</div></div></div></div>
   <div style="padding-top:16px">
-    <form id="addForm" onsubmit="addExpense(event)">
+    <div class="stack" style="margin-top:0">
+      <button class="btn secondary" id="scanReceiptBtn" onclick="document.getElementById('receiptFile').click()">📷 Scan receipt / screenshot</button>
+      <input id="receiptFile" type="file" accept="image/*" style="display:none" onchange="handleReceiptFile(event)">
+    </div>
+    <div id="ocrStatus" class="footnote hide" style="margin:8px 6px 0"></div>
+    <div id="attachmentPreview" class="group hide" style="margin-top:10px; padding:10px 12px; display:flex; align-items:center; gap:10px">
+      <img id="attachmentThumb" style="width:52px; height:52px; object-fit:cover; border-radius:8px; flex-shrink:0">
+      <div style="flex:1; min-width:0">
+        <div class="headline" style="font-size:14px">📎 Screenshot attached</div>
+        <div class="footnote" id="attachmentInfo">Will be saved with this transaction</div>
+      </div>
+      <button class="link-btn" style="color:var(--red)" onclick="removePendingAttachment()">Remove</button>
+    </div>
+
+    <form id="addForm" onsubmit="addExpense(event)" style="margin-top:16px">
       <div class="group">
         <div class="field"><label>Transaction type</label>
           <select id="transactionType" onchange="onTypeChange()">
@@ -272,6 +291,7 @@ body{
         <div class="field"><input id="note" placeholder="e.g. Milk, sabzi"></div>
       </div>
 
+      <div class="footnote hide" id="reviewNote" style="margin:6px 6px 0">📎 Fields above were guessed from the screenshot — please check them before saving.</div>
       <div class="stack"><button class="btn primary" type="submit">Save transaction</button></div>
     </form>
   </div>
@@ -375,6 +395,17 @@ body{
   </div>
 </section>
 
+<!-- Transaction detail (bottom-sheet, reuses card-modal style) -->
+<div id="detailWrap" class="hide" style="position:fixed; inset:0; z-index:60; background:color-mix(in srgb, var(--ink) 40%, transparent); display:flex; align-items:flex-end">
+  <div style="background:var(--paper); width:100%; max-height:88vh; overflow:auto; border-radius:20px 20px 0 0; padding:14px 0 calc(20px + env(safe-area-inset-bottom))">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 16px 10px">
+      <div class="headline">Transaction</div>
+      <button class="link-btn" onclick="closeTxnDetail()">Close</button>
+    </div>
+    <div id="detailBody" style="padding:0 16px"></div>
+  </div>
+</div>
+
 <div class="tabbar">
   <button class="tab active" data-tab="home" onclick="go('home')"><span class="ic">🛡️</span>Guard</button>
   <button class="tab" data-tab="add" onclick="go('add')"><span class="ic">➕</span>Add</button>
@@ -436,6 +467,144 @@ function normalizeMerchant(m){
 }
 function computeFingerprint(e){
   return [e.date, Math.round(e.amount), e.transactionType, e.paymentSource||'', normalizeMerchant(e.merchant)].join('|');
+}
+
+/* ===== Attachments (IndexedDB) =====
+   Screenshots/receipts are stored as compressed Blobs in IndexedDB, keyed by attachmentId,
+   linked to a transactionId — kept out of the localStorage JSON entirely (spec requirement:
+   don't store large image blobs in the normal transaction record). */
+const ATT_DB_NAME='ArthSetuAttachments', ATT_STORE='attachments', ATT_DB_VERSION=1;
+let _attDb=null;
+function openAttachmentsDB(){
+  if(_attDb) return Promise.resolve(_attDb);
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(ATT_DB_NAME, ATT_DB_VERSION);
+    req.onupgradeneeded=()=>{
+      const db=req.result;
+      if(!db.objectStoreNames.contains(ATT_STORE)){
+        const store=db.createObjectStore(ATT_STORE,{keyPath:'attachmentId'});
+        store.createIndex('transactionId','transactionId',{unique:false});
+      }
+    };
+    req.onsuccess=()=>{ _attDb=req.result; resolve(_attDb); };
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function saveAttachment(transactionId, blob, meta){
+  const db=await openAttachmentsDB();
+  const record={
+    attachmentId: uid(), transactionId, filename: meta.filename||'receipt.jpg',
+    mimeType: blob.type||'image/jpeg', size: blob.size, createdAt: new Date().toISOString(),
+    storageReference: ATT_STORE, blob
+  };
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(ATT_STORE,'readwrite');
+    tx.objectStore(ATT_STORE).add(record);
+    tx.oncomplete=()=>resolve(record.attachmentId);
+    tx.onerror=()=>reject(tx.error);
+  });
+}
+async function getAttachment(attachmentId){
+  const db=await openAttachmentsDB();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(ATT_STORE,'readonly');
+    const req=tx.objectStore(ATT_STORE).get(attachmentId);
+    req.onsuccess=()=>resolve(req.result||null);
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function deleteAttachment(attachmentId){
+  const db=await openAttachmentsDB();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(ATT_STORE,'readwrite');
+    tx.objectStore(ATT_STORE).delete(attachmentId);
+    tx.oncomplete=()=>resolve(true);
+    tx.onerror=()=>reject(tx.error);
+  });
+}
+
+// Downscale + re-encode as JPEG so screenshots don't bloat storage, while staying readable.
+function compressImage(file, maxDim, quality){
+  maxDim=maxDim||1600; quality=quality||0.82;
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      let {width,height}=img;
+      if(width>maxDim || height>maxDim){
+        const scale=maxDim/Math.max(width,height);
+        width=Math.round(width*scale); height=Math.round(height*scale);
+      }
+      const canvas=document.createElement('canvas');
+      canvas.width=width; canvas.height=height;
+      canvas.getContext('2d').drawImage(img,0,0,width,height);
+      canvas.toBlob(blob=>{ URL.revokeObjectURL(url); blob ? resolve(blob) : reject(new Error('compress failed')); }, 'image/jpeg', quality);
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(url); reject(new Error('image load failed')); };
+    img.src=url;
+  });
+}
+
+/* ===== OCR extraction — pure text parsing, testable independent of Tesseract/DOM ===== */
+function extractFromOCRText(text){
+  const out={amount:null, date:null, time:null, merchant:null, utr:null};
+  if(!text) return out;
+  const clean=text.replace(/\r/g,'');
+
+  // Amount: prefer one near "amount"/"paid"/"total", else the largest ₹/Rs figure found
+  const amtMatches=[...clean.matchAll(/(?:₹|Rs\.?|INR)\s?([\d,]+(?:\.\d{1,2})?)/gi)];
+  if(amtMatches.length){
+    const near=clean.match(/(?:amount|paid|total)[^\n₹Rs]{0,20}(?:₹|Rs\.?|INR)\s?([\d,]+(?:\.\d{1,2})?)/i);
+    const pick = near ? near[1] : amtMatches.map(m=>m[1]).sort((a,b)=>parseFloat(b.replace(/,/g,''))-parseFloat(a.replace(/,/g,'')))[0];
+    out.amount = Math.round(parseFloat(pick.replace(/,/g,'')));
+  }
+
+  // UTR / reference / transaction id
+  const utrMatch = clean.match(/(?:UTR|UPI\s*Ref(?:erence)?\s*(?:No\.?|Number)?|Txn\s*ID|Transaction\s*ID|Ref(?:erence)?\s*No\.?)[:\s]*([A-Za-z0-9]{6,25})/i);
+  if(utrMatch) out.utr = utrMatch[1];
+
+  // Date: "16 Aug", "16 Aug 2026", "16/08/2026", "16-08-26"
+  const dateMatch = clean.match(/(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?,?\s*\d{0,4})/i)
+    || clean.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
+  if(dateMatch) out.date = dateMatch[1].trim();
+
+  // Time: "10:32 AM"
+  const timeMatch = clean.match(/(\d{1,2}:\d{2}\s?(?:AM|PM|am|pm)?)/);
+  if(timeMatch) out.time = timeMatch[1].trim();
+
+  // Merchant: look for "Paid to <name>" / "To <name>" on its own line
+  const merchMatch = clean.match(/(?:Paid\s*to|To)[:\s]+([A-Za-z][A-Za-z0-9 &.'-]{2,40})/i);
+  if(merchMatch) out.merchant = merchMatch[1].trim();
+
+  return out;
+}
+
+// Best-effort mapping of a free-text date guess ("16 Aug", "16/08/2026") to YYYY-MM-DD,
+// assuming the current year when not stated. Returns null if it can't confidently parse.
+function parseGuessedDate(s){
+  if(!s) return null;
+  const months={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  let m=s.match(/(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?,?\s*(\d{2,4})?/);
+  if(m){
+    const mon=months[m[2].toLowerCase()];
+    if(mon===undefined) return null;
+    const year = m[3] ? (m[3].length===2 ? 2000+(+m[3]) : +m[3]) : new Date().getFullYear();
+    const day=+m[1];
+    const d=new Date(year,mon,day);
+    if(isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0,10);
+  }
+  m=s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(m){
+    let [_,a,b,y]=m;
+    if(y.length===2) y='20'+y;
+    // Assume DD/MM/YYYY (India convention) unless the first part is obviously a month (>12 -> must be day)
+    const day=+a, mon=+b-1;
+    const d=new Date(+y, mon, day);
+    if(isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0,10);
+  }
+  return null;
 }
 
 // Backward-compatible migration: adds new fields to old-format records without touching/removing
@@ -784,14 +953,94 @@ function renderHistory(me){
    const title=[e.merchant, e.category, e.subcategory].filter(Boolean).join(' · ') || e.category || 'Miscellaneous';
    const sub=[e.date.slice(5), e.paymentSource||e.paymentType, e.note].filter(Boolean).join(' · ');
    const sign = e.transactionType==='Refund' ? '−' : (e.transactionType==='Income' ? '+' : '');
+   const hasAttachment = e.attachmentIds && e.attachmentIds.length>0;
    return `
-   <div class="list-row">
-     <div><div>${TXN_ICON[e.transactionType]||''} ${escapeHtml(title)}</div><div class="meta">${escapeHtml(sub)}</div></div>
+   <div class="list-row tap" onclick="openTxnDetail('${e.id}')">
+     <div><div>${TXN_ICON[e.transactionType]||''} ${escapeHtml(title)}${hasAttachment?' 📎':''}</div><div class="meta">${escapeHtml(sub)}</div></div>
      <div class="amt">${sign}${money(e.amount)}</div>
    </div>`;
  }).join('') : `<div class="empty">No transactions yet this month.</div>`;
 }
 function escapeHtml(s){return s.replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+
+/* ===== Transaction detail view (with attachment view/replace/delete) ===== */
+let _detailTxnId=null;
+async function openTxnDetail(txnId){
+  const e=expenses.find(x=>x.id===txnId); if(!e) return;
+  _detailTxnId=txnId;
+  const sourceLabel = {
+    'screenshot-ocr':'📷 Imported from Screenshot', 'bank-pdf':'🏦 Imported from Bank Statement',
+    'card-pdf':'💳 Imported from Credit Card Statement', 'manual':'✍️ Manual entry',
+    'legacy-migrated':'✍️ Manual entry (older record)', 'quick-travel':'✍️ Quick travel entry'
+  }[e.importSource] || '';
+  document.getElementById('detailBody').innerHTML = `
+    <div class="ring-amt" style="text-align:center; margin:6px 0 2px">${money(e.amount)}</div>
+    <div class="footnote" style="text-align:center; margin-bottom:14px">${escapeHtml(e.transactionType)}${sourceLabel?' · '+sourceLabel:''}</div>
+    <div class="group">
+      <div class="cell"><span class="l">Date</span><span class="r">${e.date}${e.time?' · '+escapeHtml(e.time):''}</span></div>
+      ${e.category?`<div class="cell"><span class="l">Category</span><span class="r">${escapeHtml(e.category)}${e.subcategory?' · '+escapeHtml(e.subcategory):''}</span></div>`:''}
+      ${e.merchant?`<div class="cell"><span class="l">Merchant</span><span class="r">${escapeHtml(e.merchant)}</span></div>`:''}
+      <div class="cell"><span class="l">Payment</span><span class="r">${escapeHtml(e.paymentType||'')}${e.paymentSource?' · '+escapeHtml(e.paymentSource):''}</span></div>
+      ${e.utr?`<div class="cell"><span class="l">UTR / Ref</span><span class="r">${escapeHtml(e.utr)}</span></div>`:''}
+      <div class="cell"><span class="l">Reconciliation</span><span class="r">${escapeHtml(e.reconciliationStatus||'Unmatched')}</span></div>
+      ${e.note?`<div class="cell"><span class="l">Note</span><span class="r">${escapeHtml(e.note)}</span></div>`:''}
+    </div>
+    <div class="group-label eyebrow">Attachments</div>
+    <div class="group" id="detailAttachments"><div class="cell"><span class="l footnote">Loading…</span></div></div>
+    <div class="stack" style="margin-top:14px">
+      <button class="btn secondary" onclick="document.getElementById('replaceAttachmentFile').click()">${(e.attachmentIds&&e.attachmentIds.length)?'🔄 Replace attachment':'📎 Add attachment'}</button>
+      <input id="replaceAttachmentFile" type="file" accept="image/*" style="display:none" onchange="replaceDetailAttachment(event)">
+    </div>
+  `;
+  document.getElementById('detailWrap').classList.remove('hide');
+  renderDetailAttachments(e);
+}
+async function renderDetailAttachments(e){
+  const box=document.getElementById('detailAttachments');
+  if(!e.attachmentIds || !e.attachmentIds.length){
+    box.innerHTML=`<div class="cell"><span class="l footnote">No attachments</span></div>`; return;
+  }
+  const rows=await Promise.all(e.attachmentIds.map(async id=>{
+    const att=await getAttachment(id);
+    if(!att) return '';
+    const url=URL.createObjectURL(att.blob);
+    return `<div class="cell">
+      <div style="display:flex;align-items:center;gap:10px;flex:1">
+        <img src="${url}" style="width:44px;height:44px;object-fit:cover;border-radius:8px" onclick="window.open('${url}','_blank')">
+        <div><div class="footnote">${escapeHtml(att.filename)}</div><div class="footnote">${Math.round(att.size/1024)} KB</div></div>
+      </div>
+      <button class="link-btn" style="color:var(--red)" onclick="deleteDetailAttachment('${id}')">Delete</button>
+    </div>`;
+  }));
+  box.innerHTML = rows.join('') || `<div class="cell"><span class="l footnote">No attachments</span></div>`;
+}
+async function replaceDetailAttachment(ev){
+  const file=ev.target.files[0]; if(!file || !_detailTxnId) return;
+  const e=expenses.find(x=>x.id===_detailTxnId); if(!e) return;
+  try{
+    const compressed=await compressImage(file);
+    // remove old attachments first (replace, not add-alongside)
+    if(e.attachmentIds && e.attachmentIds.length){
+      await Promise.all(e.attachmentIds.map(id=>deleteAttachment(id).catch(()=>{})));
+    }
+    const newId=await saveAttachment(e.id, compressed, {filename:(file.name||'receipt')+'.jpg'});
+    e.attachmentIds=[newId];
+    persist(); renderHistory(monthExpenses());
+    renderDetailAttachments(e);
+    toast('Attachment updated');
+  }catch(err){ console.error(err); toast('⚠️ Could not save attachment'); }
+  ev.target.value='';
+}
+async function deleteDetailAttachment(attachmentId){
+  if(!confirm('Remove this attachment?')) return;
+  const e=expenses.find(x=>x.id===_detailTxnId); if(!e) return;
+  await deleteAttachment(attachmentId).catch(()=>{});
+  e.attachmentIds=(e.attachmentIds||[]).filter(id=>id!==attachmentId);
+  persist(); renderHistory(monthExpenses());
+  renderDetailAttachments(e);
+  toast('Attachment removed');
+}
+function closeTxnDetail(){ document.getElementById('detailWrap').classList.add('hide'); _detailTxnId=null; }
 
 function renderSettingsStats(){
  document.getElementById('entryCount').textContent=expenses.length;
@@ -845,26 +1094,110 @@ function updateMerchantList(){
   document.getElementById('merchantList').innerHTML = names.map(n=>`<option value="${escapeHtml(n)}">`).join('');
 }
 
+/* ===== Screenshot scan → OCR → review-prefill flow ===== */
+let pendingAttachment=null; // { blob, filename, ocrText }
+
+async function handleReceiptFile(ev){
+  const file=ev.target.files[0]; if(!file) return;
+  const btn=document.getElementById('scanReceiptBtn');
+  const statusEl=document.getElementById('ocrStatus');
+  statusEl.classList.remove('hide'); statusEl.textContent='📖 Reading receipt…';
+  btn.disabled=true;
+
+  try{
+    const compressed=await compressImage(file);
+    pendingAttachment={ blob:compressed, filename:(file.name||'receipt')+'.jpg' };
+    showAttachmentPreview(compressed);
+
+    if(typeof Tesseract==='undefined'){
+      statusEl.textContent='⚠️ OCR library not loaded — screenshot will still be attached, but fields won\'t auto-fill. Fill them in manually.';
+      btn.disabled=false; ev.target.value=''; return;
+    }
+
+    const worker = await getTesseractWorker();
+    const { data:{ text } } = await worker.recognize(compressed);
+    const extracted = extractFromOCRText(text);
+
+    if(extracted.amount) amount.value=extracted.amount;
+    const parsedDate=parseGuessedDate(extracted.date);
+    if(parsedDate) date.value=parsedDate;
+    if(extracted.merchant) merchant.value=extracted.merchant;
+    if(extracted.utr) utr.value=extracted.utr;
+
+    const foundAny = extracted.amount||parsedDate||extracted.merchant||extracted.utr;
+    if(foundAny){
+      statusEl.textContent='✓ Some fields guessed from the screenshot — please verify below before saving.';
+      document.getElementById('reviewNote').classList.remove('hide');
+    }else{
+      statusEl.textContent='Could not confidently read any fields — please fill them in manually. Screenshot will still be attached.';
+    }
+  }catch(e){
+    console.error(e);
+    statusEl.textContent='⚠️ Could not process the image — you can still fill the form manually.';
+  }finally{
+    btn.disabled=false; ev.target.value='';
+  }
+}
+
+let _tessWorker=null;
+async function getTesseractWorker(){
+  if(_tessWorker) return _tessWorker;
+  _tessWorker = await Tesseract.createWorker('eng', 1, {
+    workerPath: './lib/tesseract-worker.min.js',
+    corePath: './lib/tesseract-core-lstm.wasm.js',
+    langPath: './lib',
+    gzip: true
+  });
+  return _tessWorker;
+}
+
+function showAttachmentPreview(blob){
+  const url=URL.createObjectURL(blob);
+  const img=document.getElementById('attachmentThumb');
+  if(img.dataset.prevUrl) URL.revokeObjectURL(img.dataset.prevUrl);
+  img.src=url; img.dataset.prevUrl=url;
+  document.getElementById('attachmentInfo').textContent = `${Math.round(blob.size/1024)} KB — will be saved with this transaction`;
+  document.getElementById('attachmentPreview').classList.remove('hide');
+}
+function removePendingAttachment(){
+  pendingAttachment=null;
+  document.getElementById('attachmentPreview').classList.add('hide');
+  document.getElementById('reviewNote').classList.add('hide');
+  document.getElementById('ocrStatus').classList.add('hide');
+}
+
 function addExpense(ev){
  ev.preventDefault();
  const amt=+amount.value;
  if(!amt || amt<=0) return;
  const isSpendLike = transactionType.value==='Expense' || transactionType.value==='Refund';
+ const attachmentToSave = pendingAttachment; // capture before form reset clears UI state
  const txn=makeTxn({
    date: date.value, amount: amt, transactionType: transactionType.value,
    category: isSpendLike ? category.value : '', subcategory: isSpendLike ? subcategory.value : '',
    merchant: merchant.value.trim(), paymentType: paymentType.value, paymentSource: paymentSource.value,
-   utr: utr.value.trim(), note: note.value.trim()
+   utr: utr.value.trim(), note: note.value.trim(),
+   importSource: attachmentToSave ? 'screenshot-ocr' : 'manual'
  });
  expenses.push(txn);
  const ok=persist();
  updateMerchantList();
  ev.target.reset(); date.value=todayISO();
  populateCategorySelect(); onPaymentTypeChange(); onTypeChange();
+ removePendingAttachment();
  recalc();
  toast(ok?`✓ Saved — ${expenses.length} entries stored`:'⚠️ Save may have failed — check storage');
  odAutoSyncIfConnected();
  go('home');
+
+ if(attachmentToSave){
+   saveAttachment(txn.id, attachmentToSave.blob, {filename:attachmentToSave.filename})
+     .then(attachmentId=>{
+       const idx=expenses.findIndex(x=>x.id===txn.id);
+       if(idx>-1){ expenses[idx].attachmentIds=[attachmentId]; persist(); renderHistory(monthExpenses()); }
+     })
+     .catch(e=>{ console.error('Attachment save failed', e); toast('⚠️ Screenshot could not be saved as attachment',4000); });
+ }
 }
 function addTravel(type){
  const txn=makeTxn({
