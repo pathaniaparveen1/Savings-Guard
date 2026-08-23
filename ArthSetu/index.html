@@ -1,0 +1,1449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<title>ArthSetu</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ArthSetu">
+<link rel="apple-touch-icon" href="icon-180.png">
+<script src="./msal-browser.min.js" defer></script>
+<script>
+  // Track load success/failure per library with the EXACT path, so failures are diagnosable
+  // instead of a generic "didn't load" message. Populated by onload/onerror below.
+  window.__libStatus = { xlsx: 'loading', chart: 'loading', tesseract: 'loading',
+    xlsxPath: './lib/xlsx.full.min.js', chartPath: './lib/chart.umd.js', tesseractPath: './lib/tesseract.min.js' };
+</script>
+<script src="./lib/xlsx.full.min.js" defer
+  onload="window.__libStatus.xlsx='loaded'"
+  onerror="window.__libStatus.xlsx='error'"></script>
+<script src="./lib/chart.umd.js" defer
+  onload="window.__libStatus.chart='loaded'"
+  onerror="window.__libStatus.chart='error'"></script>
+<script src="./lib/tesseract.min.js" defer
+  onload="window.__libStatus.tesseract='loaded'"
+  onerror="window.__libStatus.tesseract='error'"></script>
+<style>
+/* ===== Design tokens ===== */
+:root{
+  --ink:#1C1C1E; --ink-2:#3A3A3C; --muted:#8A8A8E;
+  --paper:#F2F2F7; --card:#FFFFFF; --sep:rgba(60,60,67,0.16);
+  --green:#158048; --green-bg:#E4F5EC;
+  --amber:#B8860B; --amber-bg:#FBF1DC;
+  --red:#D0342C; --red-bg:#FBE6E5;
+  --accent:#2E7D6B; --accent-2:#3F9C87;
+  --radius-lg:20px; --radius-md:14px; --radius-sm:10px;
+  --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.05);
+}
+@media(prefers-color-scheme:dark){
+  :root{
+    --ink:#F2F2F7; --ink-2:#D1D1D6; --muted:#8E8E93;
+    --paper:#000000; --card:#1C1C1E; --sep:rgba(84,84,88,0.5);
+    --green:#32D573; --green-bg:rgba(50,213,115,0.14);
+    --amber:#E8B84B; --amber-bg:rgba(232,184,75,0.14);
+    --red:#FF6961; --red-bg:rgba(255,105,97,0.14);
+    --accent:#4FBBA3; --accent-2:#63CBB4;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.eyebrow{font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--muted); margin:0 4px 8px}
+.large-title{font-size:34px; font-weight:750; letter-spacing:-0.4px; margin:0}
+.headline{font-size:17px; font-weight:600; letter-spacing:-0.1px}
+.footnote{font-size:13px; color:var(--muted)}
+
+/* ===== App shell ===== */
+.navbar{
+  position:sticky; top:0; z-index:20;
+  padding:calc(10px + env(safe-area-inset-top)) 20px 12px;
+  background:color-mix(in srgb, var(--paper) 82%, transparent);
+  backdrop-filter:blur(20px) saturate(1.6);
+  -webkit-backdrop-filter:blur(20px) saturate(1.6);
+  border-bottom:0.5px solid var(--sep);
+}
+.navbar .row{display:flex; align-items:baseline; justify-content:space-between}
+.navbar .sub{font-size:13px; color:var(--muted); margin-top:2px}
+
+.screen{display:none; max-width:640px; margin:0 auto; padding:16px 16px calc(100px + env(safe-area-inset-bottom))}
+.screen.active{display:block; animation:rise .32s cubic-bezier(.22,1,.36,1)}
+@keyframes rise{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.screen.active{animation:none}}
+
+.group-label{margin:22px 6px 8px}
+.group{background:var(--card); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow)}
+.cell{display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:0.5px solid var(--sep); gap:12px}
+.cell:last-child{border-bottom:none}
+.cell .l{color:var(--ink)} .cell .r{color:var(--muted); font-size:15px; text-align:right}
+.cell.tap{cursor:pointer} .cell.tap:active{background:color-mix(in srgb, var(--ink) 6%, transparent)}
+.cell .chev{color:var(--sep); margin-left:2px}
+
+/* ===== Guard Ring hero ===== */
+.hero{background:var(--card); border-radius:var(--radius-lg); box-shadow:var(--shadow); padding:22px 18px; text-align:center}
+.ring-wrap{position:relative; width:180px; height:180px; margin:6px auto 4px}
+.ring-wrap svg{transform:rotate(-90deg)}
+.ring-track{fill:none; stroke:var(--sep); stroke-width:14}
+.ring-bar{fill:none; stroke-width:14; stroke-linecap:round; transition:stroke-dashoffset .6s cubic-bezier(.22,1,.36,1), stroke .3s}
+.ring-center{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center}
+.ring-amt{font-size:26px; font-weight:750; letter-spacing:-0.4px}
+.ring-label{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-top:2px}
+.pill{display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:999px; font-weight:700; font-size:12px; margin-top:12px}
+.pill.safe{background:var(--green-bg); color:var(--green)}
+.pill.caution{background:var(--amber-bg); color:var(--amber)}
+.pill.danger{background:var(--red-bg); color:var(--red)}
+.hero .note{font-size:13px; color:var(--muted); margin-top:10px; line-height:1.4}
+
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px}
+.stat{background:var(--card); border-radius:var(--radius-md); box-shadow:var(--shadow); padding:14px}
+.stat .label{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em}
+.stat .val{font-size:20px; font-weight:700; margin-top:4px; letter-spacing:-0.2px}
+
+/* ===== Forms & buttons ===== */
+.field{display:flex; flex-direction:column; gap:6px; padding:12px 16px; border-bottom:0.5px solid var(--sep)}
+.field:last-child{border-bottom:none}
+.field label{font-size:12px; color:var(--muted)}
+.field input, .field select{
+  font:inherit; font-size:17px; border:none; background:transparent; color:var(--ink); padding:2px 0; -webkit-appearance:none;
+}
+.field input:focus, .field select:focus{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
+.btn{
+  display:block; width:100%; text-align:center; font:inherit; font-weight:650; font-size:17px;
+  padding:15px; border-radius:var(--radius-md); border:none; cursor:pointer; -webkit-appearance:none;
+}
+.btn.primary{background:var(--ink); color:var(--paper)}
+.btn.primary:active{opacity:.75}
+.btn.secondary{background:var(--card); color:var(--accent); box-shadow:var(--shadow)}
+.btn.secondary:active{opacity:.7}
+.btn.ghost{background:var(--red-bg); color:var(--red)}
+.row2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+.stack{display:flex; flex-direction:column; gap:10px; margin-top:14px}
+
+/* ===== Tab bar ===== */
+.tabbar{
+  position:fixed; left:0; right:0; bottom:0; z-index:30;
+  display:flex; justify-content:space-around; align-items:center;
+  padding:8px 6px calc(6px + env(safe-area-inset-bottom));
+  background:color-mix(in srgb, var(--paper) 78%, transparent);
+  backdrop-filter:blur(20px) saturate(1.6); -webkit-backdrop-filter:blur(20px) saturate(1.6);
+  border-top:0.5px solid var(--sep);
+}
+.tab{background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:2px; color:var(--muted); font:inherit; font-size:10.5px; font-weight:600; padding:4px 6px; cursor:pointer; flex:1}
+.tab .ic{font-size:22px; line-height:1}
+.tab.active{color:var(--accent)}
+.tab:active{opacity:.6}
+
+/* ===== Misc ===== */
+.list-row{display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:0.5px solid var(--sep); gap:10px}
+.list-row.tap{cursor:pointer} .list-row.tap:active{background:color-mix(in srgb, var(--ink) 6%, transparent)}
+.list-row:last-child{border-bottom:none}
+.list-row .meta{font-size:12px; color:var(--muted); margin-top:2px}
+.list-row .amt{font-weight:700; font-size:15px; white-space:nowrap}
+.empty{padding:26px 16px; text-align:center; color:var(--muted); font-size:14px}
+.badge{background:var(--accent); color:#fff; border-radius:999px; padding:2px 8px; font-size:11px; font-weight:700}
+
+.toast{
+  position:fixed; left:50%; bottom:96px; transform:translate(-50%,16px); opacity:0;
+  background:var(--ink); color:var(--paper); padding:10px 16px; border-radius:999px; font-size:13px; font-weight:600;
+  box-shadow:var(--shadow); z-index:50; pointer-events:none; transition:all .35s cubic-bezier(.22,1,.36,1);
+  display:flex; align-items:center; gap:6px;
+}
+.toast.show{opacity:1; transform:translate(-50%,0)}
+
+.banner{background:var(--card); border-radius:var(--radius-md); box-shadow:var(--shadow); padding:14px 16px; margin-bottom:14px}
+.banner .row{display:flex; justify-content:space-between; align-items:center; gap:10px}
+.link-btn{background:none;border:none;color:var(--accent);font:inherit;font-weight:650;font-size:13px;cursor:pointer;padding:0}
+.hide{display:none !important}
+</style>
+</head>
+<body>
+
+<div id="updateBanner" class="banner hide" style="position:fixed;top:calc(env(safe-area-inset-top) + 4px);left:16px;right:16px;z-index:40">
+  <div class="row"><span class="footnote"><b style="color:var(--ink)">Update ready.</b> A new version is available.</span>
+  <button class="link-btn" onclick="location.reload()">Reload</button></div>
+</div>
+
+<!-- ===================== HOME ===================== -->
+<section id="screen-home" class="screen active">
+  <div class="navbar" data-nav="home"><div class="row"><div><div class="large-title">ArthSetu</div><div class="sub" id="dateLine"></div></div></div></div>
+  <div style="padding-top:16px">
+    <div id="installBanner" class="banner hide">
+      <div class="row"><span class="footnote"><b style="color:var(--ink)">Install on iPhone.</b> Share → Add to Home Screen.</span>
+      <button class="link-btn" onclick="hideInstall()">Hide</button></div>
+    </div>
+
+    <div class="hero">
+      <div class="ring-wrap">
+        <svg width="180" height="180" viewBox="0 0 180 180">
+          <circle class="ring-track" cx="90" cy="90" r="78"/>
+          <circle id="ringBar" class="ring-bar" cx="90" cy="90" r="78" stroke="var(--green)" stroke-dasharray="490" stroke-dashoffset="490"/>
+        </svg>
+        <div class="ring-center">
+          <div class="ring-amt" id="expectedSaving">₹0</div>
+          <div class="ring-label">Expected saving</div>
+        </div>
+      </div>
+      <div id="statusPill" class="pill safe">🛡️ SAFE</div>
+      <div class="note" id="statusText"></div>
+    </div>
+
+    <div class="grid2">
+      <div class="stat"><div class="label">Salary</div><div class="val" id="salary">₹0</div></div>
+      <div class="stat"><div class="label">Saving target</div><div class="val">₹25,000</div></div>
+      <div class="stat"><div class="label">Fixed expenses</div><div class="val" id="fixed">₹0</div></div>
+      <div class="stat"><div class="label">Spent this month</div><div class="val" id="spent">₹0</div></div>
+    </div>
+
+    <div class="group-label eyebrow">Today</div>
+    <div class="group">
+      <div class="cell"><span class="l">Manageable average</span><span class="r" id="todayBudget">₹0/day</span></div>
+      <div class="cell"><span class="l">Spent today</span><span class="r" id="todaySpent">₹0</span></div>
+      <div class="cell"><span class="l">Still available today</span><span class="r" id="todayRemaining">₹0</span></div>
+    </div>
+
+    <div class="group-label eyebrow">Quick travel</div>
+    <div class="stack" style="margin-top:0">
+      <div class="row2">
+        <button class="btn secondary" onclick="addTravel('Bus')">🚌 Bus · ₹100</button>
+        <button class="btn secondary" onclick="addTravel('Bike')">🏍️ Bike · ₹221</button>
+      </div>
+    </div>
+
+    <div class="group-label eyebrow">Spending by category · this month</div>
+    <div class="group" style="padding:16px"><canvas id="chartCategory" height="220"></canvas></div>
+
+    <div class="group-label eyebrow">Spending by payment source · this month</div>
+    <div class="group" style="padding:16px"><canvas id="chartPaymentSource" height="200"></canvas></div>
+
+    <div class="group-label eyebrow">Expense trend · last 6 months</div>
+    <div class="group" style="padding:16px"><canvas id="chartTrend" height="200"></canvas></div>
+  </div>
+</section>
+
+<!-- ===================== ADD ===================== -->
+<section id="screen-add" class="screen">
+  <div class="navbar" data-nav="add"><div class="row"><div><div class="large-title">Add transaction</div></div></div></div>
+  <div style="padding-top:16px">
+    <div class="stack" style="margin-top:0">
+      <button class="btn secondary" id="scanReceiptBtn" onclick="document.getElementById('receiptFile').click()">📷 Scan receipt / screenshot</button>
+      <input id="receiptFile" type="file" accept="image/*" style="display:none" onchange="handleReceiptFile(event)">
+    </div>
+    <div id="ocrStatus" class="footnote hide" style="margin:8px 6px 0"></div>
+    <div id="attachmentPreview" class="group hide" style="margin-top:10px; padding:10px 12px; display:flex; align-items:center; gap:10px">
+      <img id="attachmentThumb" style="width:52px; height:52px; object-fit:cover; border-radius:8px; flex-shrink:0">
+      <div style="flex:1; min-width:0">
+        <div class="headline" style="font-size:14px">📎 Screenshot attached</div>
+        <div class="footnote" id="attachmentInfo">Will be saved with this transaction</div>
+      </div>
+      <button class="link-btn" style="color:var(--red)" onclick="removePendingAttachment()">Remove</button>
+    </div>
+
+    <form id="addForm" onsubmit="addExpense(event)" style="margin-top:16px">
+      <div class="group">
+        <div class="field"><label>Transaction type</label>
+          <select id="transactionType" onchange="onTypeChange()">
+            <option>Expense</option><option>Income</option><option>Transfer</option>
+            <option>Refund</option><option>Investment</option><option>Credit Card Payment</option>
+          </select>
+        </div>
+        <div class="field"><label>Date</label><input id="date" type="date" required></div>
+        <div class="field"><label>Amount (₹)</label><input id="amount" type="number" min="1" step="1" inputmode="numeric" placeholder="0" required></div>
+      </div>
+
+      <div class="group-label eyebrow" id="categoryGroupLabel">Category</div>
+      <div class="group" id="categoryGroup">
+        <div class="field"><label>Category</label>
+          <select id="category" onchange="onCategoryChange()"></select>
+        </div>
+        <div class="field"><label>Subcategory</label>
+          <select id="subcategory"></select>
+        </div>
+        <div class="field"><label>Merchant / Vendor (optional)</label>
+          <input id="merchant" list="merchantList" placeholder="e.g. Mother Dairy, Amazon">
+          <datalist id="merchantList"></datalist>
+        </div>
+      </div>
+
+      <div class="group-label eyebrow">Payment</div>
+      <div class="group">
+        <div class="field"><label>Payment type</label>
+          <select id="paymentType" onchange="onPaymentTypeChange()">
+            <option>UPI</option><option>Card</option><option>Cash</option><option>Bank Transfer</option><option>Other</option>
+          </select>
+        </div>
+        <div class="field" id="paymentSourceField"><label>Payment source</label>
+          <select id="paymentSource"></select>
+        </div>
+        <div class="field"><label>UTR / Transaction ID (optional)</label>
+          <input id="utr" placeholder="If you have it — helps avoid duplicates later"></div>
+      </div>
+
+      <div class="group-label eyebrow">Note</div>
+      <div class="group">
+        <div class="field"><input id="note" placeholder="e.g. Milk, sabzi"></div>
+      </div>
+
+      <div class="footnote hide" id="reviewNote" style="margin:6px 6px 0">📎 Fields above were guessed from the screenshot — please check them before saving.</div>
+      <div class="stack"><button class="btn primary" type="submit">Save transaction</button></div>
+    </form>
+  </div>
+</section>
+
+<!-- ===================== CARDS ===================== -->
+<section id="screen-cards" class="screen">
+  <div class="navbar" data-nav="cards"><div class="row"><div><div class="large-title">Cards</div></div></div></div>
+  <div style="padding-top:16px">
+    <div class="stack" style="margin-top:0">
+      <button class="btn secondary" onclick="openCardForm()">➕ Add / update card</button>
+    </div>
+    <div class="group-label eyebrow">Your cards</div>
+    <div id="cardsList"></div>
+    <div class="footnote" style="margin:12px 6px 0">Utilization = Outstanding ÷ Credit Limit × 100. No fixed percentage guarantees a particular credit-score outcome — this is just for your own tracking.</div>
+  </div>
+</section>
+
+<div id="cardFormWrap" class="hide" style="position:fixed; inset:0; z-index:60; background:color-mix(in srgb, var(--ink) 40%, transparent); display:flex; align-items:flex-end">
+  <div style="background:var(--paper); width:100%; max-height:88vh; overflow:auto; border-radius:20px 20px 0 0; padding:14px 0 calc(20px + env(safe-area-inset-bottom))">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 16px 10px">
+      <div class="headline" id="cardFormTitle">Add card</div>
+      <button class="link-btn" onclick="closeCardForm()">Close</button>
+    </div>
+    <div class="group" style="margin:0 16px; width:calc(100% - 32px)">
+      <div class="field"><label>Card</label>
+        <select id="cf_name">
+          <option>SBI SimplyCLICK Visa</option>
+          <option>Tata Neu Infinity SBI Card</option>
+          <option>Other (type below)</option>
+        </select>
+      </div>
+      <div class="field"><label>Custom name (if "Other" selected)</label><input id="cf_customName" placeholder="Card name"></div>
+      <div class="field"><label>Credit limit (₹)</label><input id="cf_limit" type="number" inputmode="numeric"></div>
+      <div class="field"><label>Current outstanding (₹)</label><input id="cf_outstanding" type="number" inputmode="numeric"></div>
+      <div class="field"><label>Minimum amount due (₹)</label><input id="cf_minDue" type="number" inputmode="numeric"></div>
+      <div class="field"><label>Total amount due (₹)</label><input id="cf_totalDue" type="number" inputmode="numeric"></div>
+      <div class="field"><label>Statement date</label><input id="cf_statementDate" type="date"></div>
+      <div class="field"><label>Payment due date</label><input id="cf_dueDate" type="date"></div>
+    </div>
+    <div class="stack" style="margin:14px 16px 0">
+      <button class="btn primary" onclick="saveCardForm()">Save card</button>
+      <button class="btn ghost hide" id="cf_deleteBtn" onclick="deleteCardForm()">Delete card</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== HISTORY ===================== -->
+<section id="screen-history" class="screen">
+  <div class="navbar" data-nav="history"><div class="row"><div><div class="large-title">History</div></div>
+    <button class="link-btn" onclick="clearAll()" style="color:var(--red)">Reset month</button></div></div>
+  <div style="padding-top:16px">
+    <div class="group-label eyebrow">This month · <span id="histCount">0</span> entries</div>
+    <div class="group" id="historyList"></div>
+
+    <div class="group-label eyebrow">Fixed monthly expenses</div>
+    <div class="group" id="fixedList"></div>
+  </div>
+</section>
+
+<!-- ===================== SETTINGS ===================== -->
+<section id="screen-settings" class="screen">
+  <div class="navbar" data-nav="settings"><div class="row"><div><div class="large-title">Settings</div></div></div></div>
+  <div style="padding-top:16px">
+    <div class="group-label eyebrow">Data on this device</div>
+    <div class="group">
+      <div class="cell"><span class="l">Entries stored</span><span class="r" id="entryCount">0</span></div>
+      <div class="cell"><span class="l">Last saved</span><span class="r" id="lastSaved">—</span></div>
+      <div class="cell"><span class="l">Last backup exported</span><span class="r" id="lastBackup">Never</span></div>
+    </div>
+    <div class="footnote" style="margin:8px 6px 0">Data lives only in this browser/app. Export a backup regularly — reinstalling or clearing Safari data will erase it.</div>
+
+    <div class="group-label eyebrow">General</div>
+    <div class="group">
+      <div class="cell tap" onclick="editSalary()"><span class="l">Edit salary</span><span class="r">₹<span id="salarySettings">0</span> <span class="chev">›</span></span></div>
+      <div class="cell tap" onclick="showInstall()"><span class="l">iPhone install help</span><span class="r chev">›</span></div>
+    </div>
+
+    <div class="group-label eyebrow">Backup</div>
+    <div class="stack" style="margin-top:0">
+      <button class="btn secondary" id="exportExcelBtn" onclick="exportExcel()" disabled>⏳ Loading Excel library…</button>
+      <button class="btn secondary" onclick="exportData()">⬆️ Export backup (JSON)</button>
+      <button class="btn secondary" onclick="document.getElementById('importFile').click()">⬇️ Import backup</button>
+      <input id="importFile" type="file" accept="application/json" style="display:none" onchange="importData(event)">
+    </div>
+
+    <div class="group-label eyebrow">OneDrive auto-sync</div>
+    <div class="group">
+      <div class="cell"><span class="l">Status</span><span class="r" id="odStatus">Not connected</span></div>
+      <div class="cell"><span class="l">Last synced</span><span class="r" id="odLastSync">—</span></div>
+    </div>
+    <div class="stack" style="margin-top:10px">
+      <button class="btn secondary" id="odConnectBtn" onclick="onedriveConnect()">☁️ Connect OneDrive</button>
+      <button class="btn secondary hide" id="odSyncBtn" onclick="onedriveSyncNow()">🔄 Sync now</button>
+      <button class="btn ghost hide" id="odDisconnectBtn" onclick="onedriveDisconnect()">Disconnect OneDrive</button>
+    </div>
+    <div class="footnote" style="margin:8px 6px 0">Backs up to a private app folder in your OneDrive (Apps/ArthSetu) — no access to your other files. Syncs automatically after every save once connected.</div>
+
+    <div class="group-label eyebrow">About</div>
+    <div class="group"><div class="cell"><span class="l">Version</span><span class="r" id="verLine">—</span></div></div>
+  </div>
+</section>
+
+<!-- Transaction detail (bottom-sheet, reuses card-modal style) -->
+<div id="detailWrap" class="hide" style="position:fixed; inset:0; z-index:60; background:color-mix(in srgb, var(--ink) 40%, transparent); display:flex; align-items:flex-end">
+  <div style="background:var(--paper); width:100%; max-height:88vh; overflow:auto; border-radius:20px 20px 0 0; padding:14px 0 calc(20px + env(safe-area-inset-bottom))">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 16px 10px">
+      <div class="headline">Transaction</div>
+      <button class="link-btn" onclick="closeTxnDetail()">Close</button>
+    </div>
+    <div id="detailBody" style="padding:0 16px"></div>
+  </div>
+</div>
+
+<div class="tabbar">
+  <button class="tab active" data-tab="home" onclick="go('home')"><span class="ic">🛡️</span>Guard</button>
+  <button class="tab" data-tab="add" onclick="go('add')"><span class="ic">➕</span>Add</button>
+  <button class="tab" data-tab="cards" onclick="go('cards')"><span class="ic">💳</span>Cards</button>
+  <button class="tab" data-tab="history" onclick="go('history')"><span class="ic">📋</span>History</button>
+  <button class="tab" data-tab="settings" onclick="go('settings')"><span class="ic">⚙️</span>Settings</button>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const APP_VERSION='v4.0';
+const SCHEMA_VERSION=2;
+const CFG={
+ salary:62000,target:25000,
+ fixed:[
+  ["Pathankot–Mamoon rent",5000],["Mamoon electricity",500],["Ganaur rent",3000],
+  ["Cleaning",300],["Water",200],["Ganaur electricity",400],["EMI",10000],
+  ["Health Insurance",1345],["Life Cover – Self",1099],["Life Cover – Spouse",599],
+  ["WiFi Kadana",471],["Airtel Postpaid",825],["Mummy ji recharge",700],["Daughter fee",3100]
+ ],
+ bus:100,bike:221,
+ cards:{ // name -> credit limit (editable in Settings)
+   "SBI SimplyCLICK Visa": 0,
+   "Tata Neu Infinity SBI Card": 0
+ }
+};
+
+// Vegetarian-only categories, per user's stated requirement.
+const CATEGORIES={
+  Food:["Tea/Coffee","Breakfast","Lunch/Dinner","Snacks","Restaurant","Alcohol","Other Food"],
+  Grocery:["Milk","Curd","Rice","Atta","Dal","Oil","Sugar","Tomatoes","Sabziyan","Fruits","Bread","Spices","Dry Fruits","Other Grocery"],
+  Travel:["Bus","Bike","Auto","Other Travel"],
+  Personal:["Other Personal"],
+  Family:["Other Family"],
+  Medical:["Other Medical"],
+  Miscellaneous:["Other"]
+};
+
+// Payment sources: Tata Neu UPI included, PhonePe/WhatsApp Pay intentionally excluded per user's stated apps.
+const PAYMENT_SOURCES={
+  "UPI":["Tata Neu UPI","Google Pay","Paytm","BHIM","Amazon Pay","Other UPI"],
+  "Card":["SBI SimplyCLICK Visa","Tata Neu Infinity SBI Card"],
+  "Cash":["Cash"],
+  "Bank Transfer":["SBI","ICICI Bank","HDFC Bank","Axis Bank","PNB","Other Bank"],
+  "Other":["Other"]
+};
+
+const TXN_TYPES=["Expense","Income","Transfer","Refund","Investment","Credit Card Payment"];
+const SPEND_TYPES=new Set(["Expense","Refund"]); // Refund is spend-reducing, not spend-adding — see spendDelta()
+
+const KEY='savingGuardExpenses', SALARY_KEY='savingGuardSalary', BACKUP_KEY='savingGuardLastBackup';
+let expenses=[];
+
+function uid(){ return 'txn_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8); }
+
+function normalizeMerchant(m){
+  return (m||'').trim().toLowerCase().replace(/\s+/g,' ');
+}
+function computeFingerprint(e){
+  return [e.date, Math.round(e.amount), e.transactionType, e.paymentSource||'', normalizeMerchant(e.merchant)].join('|');
+}
+
+/* ===== Attachments (IndexedDB) =====
+   Screenshots/receipts are stored as compressed Blobs in IndexedDB, keyed by attachmentId,
+   linked to a transactionId — kept out of the localStorage JSON entirely (spec requirement:
+   don't store large image blobs in the normal transaction record). */
+const ATT_DB_NAME='ArthSetuAttachments', ATT_STORE='attachments', ATT_DB_VERSION=1;
+let _attDb=null;
+function openAttachmentsDB(){
+  if(_attDb) return Promise.resolve(_attDb);
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(ATT_DB_NAME, ATT_DB_VERSION);
+    req.onupgradeneeded=()=>{
+      const db=req.result;
+      if(!db.objectStoreNames.contains(ATT_STORE)){
+        const store=db.createObjectStore(ATT_STORE,{keyPath:'attachmentId'});
+        store.createIndex('transactionId','transactionId',{unique:false});
+      }
+    };
+    req.onsuccess=()=>{ _attDb=req.result; resolve(_attDb); };
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function saveAttachment(transactionId, blob, meta){
+  const db=await openAttachmentsDB();
+  const record={
+    attachmentId: uid(), transactionId, filename: meta.filename||'receipt.jpg',
+    mimeType: blob.type||'image/jpeg', size: blob.size, createdAt: new Date().toISOString(),
+    storageReference: ATT_STORE, blob
+  };
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(ATT_STORE,'readwrite');
+    tx.objectStore(ATT_STORE).add(record);
+    tx.oncomplete=()=>resolve(record.attachmentId);
+    tx.onerror=()=>reject(tx.error);
+  });
+}
+async function getAttachment(attachmentId){
+  const db=await openAttachmentsDB();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(ATT_STORE,'readonly');
+    const req=tx.objectStore(ATT_STORE).get(attachmentId);
+    req.onsuccess=()=>resolve(req.result||null);
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function deleteAttachment(attachmentId){
+  const db=await openAttachmentsDB();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(ATT_STORE,'readwrite');
+    tx.objectStore(ATT_STORE).delete(attachmentId);
+    tx.oncomplete=()=>resolve(true);
+    tx.onerror=()=>reject(tx.error);
+  });
+}
+
+// Downscale + re-encode as JPEG so screenshots don't bloat storage, while staying readable.
+function compressImage(file, maxDim, quality){
+  maxDim=maxDim||1600; quality=quality||0.82;
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      let {width,height}=img;
+      if(width>maxDim || height>maxDim){
+        const scale=maxDim/Math.max(width,height);
+        width=Math.round(width*scale); height=Math.round(height*scale);
+      }
+      const canvas=document.createElement('canvas');
+      canvas.width=width; canvas.height=height;
+      canvas.getContext('2d').drawImage(img,0,0,width,height);
+      canvas.toBlob(blob=>{ URL.revokeObjectURL(url); blob ? resolve(blob) : reject(new Error('compress failed')); }, 'image/jpeg', quality);
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(url); reject(new Error('image load failed')); };
+    img.src=url;
+  });
+}
+
+/* ===== OCR extraction — pure text parsing, testable independent of Tesseract/DOM ===== */
+function extractFromOCRText(text){
+  const out={amount:null, date:null, time:null, merchant:null, utr:null};
+  if(!text) return out;
+  const clean=text.replace(/\r/g,'');
+
+  // Amount: prefer one near "amount"/"paid"/"total", else the largest ₹/Rs figure found
+  const amtMatches=[...clean.matchAll(/(?:₹|Rs\.?|INR)\s?([\d,]+(?:\.\d{1,2})?)/gi)];
+  if(amtMatches.length){
+    const near=clean.match(/(?:amount|paid|total)[^\n₹Rs]{0,20}(?:₹|Rs\.?|INR)\s?([\d,]+(?:\.\d{1,2})?)/i);
+    const pick = near ? near[1] : amtMatches.map(m=>m[1]).sort((a,b)=>parseFloat(b.replace(/,/g,''))-parseFloat(a.replace(/,/g,'')))[0];
+    out.amount = Math.round(parseFloat(pick.replace(/,/g,'')));
+  }
+
+  // UTR / reference / transaction id
+  const utrMatch = clean.match(/(?:UTR|UPI\s*Ref(?:erence)?\s*(?:No\.?|Number)?|Txn\s*ID|Transaction\s*ID|Ref(?:erence)?\s*No\.?)[:\s]*([A-Za-z0-9]{6,25})/i);
+  if(utrMatch) out.utr = utrMatch[1];
+
+  // Date: "16 Aug", "16 Aug 2026", "16/08/2026", "16-08-26"
+  const dateMatch = clean.match(/(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?,?\s*\d{0,4})/i)
+    || clean.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
+  if(dateMatch) out.date = dateMatch[1].trim();
+
+  // Time: "10:32 AM"
+  const timeMatch = clean.match(/(\d{1,2}:\d{2}\s?(?:AM|PM|am|pm)?)/);
+  if(timeMatch) out.time = timeMatch[1].trim();
+
+  // Merchant: look for "Paid to <name>" / "To <name>" on its own line
+  const merchMatch = clean.match(/(?:Paid\s*to|To)[:\s]+([A-Za-z][A-Za-z0-9 &.'-]{2,40})/i);
+  if(merchMatch) out.merchant = merchMatch[1].trim();
+
+  return out;
+}
+
+// Best-effort mapping of a free-text date guess ("16 Aug", "16/08/2026") to YYYY-MM-DD,
+// assuming the current year when not stated. Returns null if it can't confidently parse.
+function parseGuessedDate(s){
+  if(!s) return null;
+  const months={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  let m=s.match(/(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?,?\s*(\d{2,4})?/);
+  if(m){
+    const mon=months[m[2].toLowerCase()];
+    if(mon===undefined) return null;
+    const year = m[3] ? (m[3].length===2 ? 2000+(+m[3]) : +m[3]) : new Date().getFullYear();
+    const day=+m[1];
+    const d=new Date(year,mon,day);
+    if(isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0,10);
+  }
+  m=s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(m){
+    let [_,a,b,y]=m;
+    if(y.length===2) y='20'+y;
+    // Assume DD/MM/YYYY (India convention) unless the first part is obviously a month (>12 -> must be day)
+    const day=+a, mon=+b-1;
+    const d=new Date(+y, mon, day);
+    if(isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0,10);
+  }
+  return null;
+}
+
+// Backward-compatible migration: adds new fields to old-format records without touching/removing
+// anything that's already there. Never deletes a record for missing fields (per requirement).
+function migrateExpenses(){
+  const ver=Number(localStorage.getItem('savingGuardSchemaVersion')||'1');
+  if(ver>=SCHEMA_VERSION) return;
+  expenses=expenses.map(e=>{
+    if(e.id && e.transactionType) return e; // already migrated
+    const createdAt = e.ts ? new Date(e.ts).toISOString() : (e.date ? e.date+'T00:00:00.000Z' : new Date().toISOString());
+    let paymentType = e.mode || 'Other';
+    if(paymentType==='Bank') paymentType='Bank Transfer';
+    if(!TXN_TYPES.includes(paymentType)) { /* mode was never a txn type, ignore */ }
+    const migrated = {
+      ...e, // preserve every original field (e.g. legacy `mode`, `ts`) even though superseded below —
+             // "never delete old records because new fields are missing" per requirement
+      id: e.id || uid(),
+      date: e.date, time: e.time || null,
+      amount: e.amount,
+      transactionType: e.transactionType || 'Expense',
+      category: e.category || 'Miscellaneous',
+      subcategory: e.subcategory || '',
+      merchant: e.merchant || '',
+      paymentType: ['UPI','Card','Cash','Bank Transfer','Other'].includes(paymentType) ? paymentType : 'Other',
+      paymentSource: e.paymentSource || '',
+      utr: e.utr || '',
+      transactionReference: e.transactionReference || '',
+      note: e.note || '',
+      importSource: e.importSource || 'legacy-migrated',
+      reconciliationStatus: e.reconciliationStatus || 'Unmatched',
+      attachmentIds: e.attachmentIds || [],
+      createdAt: e.createdAt || createdAt,
+      updatedAt: e.updatedAt || createdAt
+    };
+    migrated.fingerprint = computeFingerprint(migrated);
+    return migrated;
+  });
+  localStorage.setItem('savingGuardSchemaVersion', String(SCHEMA_VERSION));
+  persist();
+}
+
+function loadExpenses(){
+  try{ expenses=JSON.parse(localStorage.getItem(KEY)||'[]'); }
+  catch(e){ expenses=[]; }
+  migrateExpenses();
+}
+function persist(){
+  localStorage.setItem(KEY, JSON.stringify(expenses));
+  // read back immediately to confirm the write actually round-tripped
+  const check=JSON.parse(localStorage.getItem(KEY)||'[]');
+  const ok = check.length===expenses.length;
+  localStorage.setItem('savingGuardLastSaved', new Date().toISOString());
+  return ok;
+}
+
+function spendDelta(e){
+  if(!SPEND_TYPES.has(e.transactionType)) return 0;
+  return e.transactionType==='Refund' ? -e.amount : e.amount;
+}
+
+/* ===== Credit Cards (manual entry — statement import comes in a later phase) ===== */
+const CARDS_KEY='savingGuardCards';
+let cardsList=[];
+function loadCards(){
+  try{ cardsList=JSON.parse(localStorage.getItem(CARDS_KEY)||'[]'); }
+  catch(e){ cardsList=[]; }
+}
+function persistCards(){ localStorage.setItem(CARDS_KEY, JSON.stringify(cardsList)); }
+
+function cardStatus(pct){
+  if(pct<30) return {label:'Healthy', cls:'safe'};
+  if(pct<60) return {label:'Watch', cls:'caution'};
+  return {label:'High', cls:'danger'};
+}
+
+function renderCards(){
+  const wrap=document.getElementById('cardsList');
+  if(!wrap) return;
+  if(!cardsList.length){ wrap.innerHTML='<div class="group"><div class="empty">No cards added yet.</div></div>'; return; }
+  wrap.innerHTML = cardsList.map((c,i)=>{
+    const limit=Number(c.limit)||0, outstanding=Number(c.outstanding)||0;
+    const pct = limit>0 ? Math.min(100, Math.round((outstanding/limit)*100)) : 0;
+    const st = cardStatus(pct);
+    const dueLine = c.dueDate ? `Due ${new Date(c.dueDate).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}` : 'Due date not set';
+    return `
+    <div class="group" style="margin-bottom:12px">
+      <div class="cell tap" onclick="openCardForm(${i})">
+        <div>
+          <div class="headline">${escapeHtml(c.name)}</div>
+          <div class="footnote" style="margin-top:2px">${money(outstanding)} of ${money(limit)} used · ${dueLine}</div>
+        </div>
+        <span class="pill ${st.cls}" style="margin:0">${pct}% ${st.label}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+let editingCardIndex=null;
+function openCardForm(index){
+  editingCardIndex = (typeof index==='number') ? index : null;
+  const c = editingCardIndex!==null ? cardsList[editingCardIndex] : {name:'SBI SimplyCLICK Visa',limit:'',outstanding:'',minDue:'',totalDue:'',statementDate:'',dueDate:''};
+  document.getElementById('cardFormTitle').textContent = editingCardIndex!==null ? 'Edit card' : 'Add card';
+  const knownNames=['SBI SimplyCLICK Visa','Tata Neu Infinity SBI Card'];
+  cf_name.value = knownNames.includes(c.name) ? c.name : 'Other (type below)';
+  cf_customName.value = knownNames.includes(c.name) ? '' : (c.name||'');
+  cf_limit.value=c.limit||''; cf_outstanding.value=c.outstanding||'';
+  cf_minDue.value=c.minDue||''; cf_totalDue.value=c.totalDue||'';
+  cf_statementDate.value=c.statementDate||''; cf_dueDate.value=c.dueDate||'';
+  document.getElementById('cf_deleteBtn').classList.toggle('hide', editingCardIndex===null);
+  document.getElementById('cardFormWrap').classList.remove('hide');
+}
+function closeCardForm(){ document.getElementById('cardFormWrap').classList.add('hide'); editingCardIndex=null; }
+function saveCardForm(){
+  const name = cf_name.value==='Other (type below)' ? cf_customName.value.trim() : cf_name.value;
+  if(!name){ toast('⚠️ Card name required'); return; }
+  const card={ name, limit:+cf_limit.value||0, outstanding:+cf_outstanding.value||0,
+    minDue:+cf_minDue.value||0, totalDue:+cf_totalDue.value||0,
+    statementDate: cf_statementDate.value||'', dueDate: cf_dueDate.value||'' };
+  if(editingCardIndex!==null) cardsList[editingCardIndex]=card; else cardsList.push(card);
+  persistCards(); renderCards(); closeCardForm();
+  toast('Card saved');
+}
+function deleteCardForm(){
+  if(editingCardIndex===null) return;
+  if(confirm('Delete this card?')){ cardsList.splice(editingCardIndex,1); persistCards(); renderCards(); closeCardForm(); toast('Card deleted'); }
+}
+
+/* ===== Excel export (SheetJS, self-hosted) =====
+   Sheets included only for data that actually exists today. Investments/Attachments/Reconciliation
+   sheets will be added once those phases are implemented — an empty placeholder sheet would be
+   misleading, not useful. */
+function waitForXLSX(timeoutMs){
+  return new Promise((resolve,reject)=>{
+    if(typeof XLSX!=='undefined') return resolve();
+    if(window.__libStatus && window.__libStatus.xlsx==='error') return reject(new Error('load-error'));
+    const start=Date.now();
+    const iv=setInterval(()=>{
+      if(typeof XLSX!=='undefined'){ clearInterval(iv); resolve(); return; }
+      if(window.__libStatus && window.__libStatus.xlsx==='error'){ clearInterval(iv); reject(new Error('load-error')); return; }
+      if(Date.now()-start>timeoutMs){ clearInterval(iv); reject(new Error('timeout')); }
+    },150);
+  });
+}
+
+async function exportExcel(){
+  const btn=document.getElementById('exportExcelBtn');
+  const path=(window.__libStatus && window.__libStatus.xlsxPath) || './lib/xlsx.full.min.js';
+  if(typeof XLSX==='undefined'){
+    if(btn){ btn.disabled=true; btn.textContent='⏳ Loading Excel library…'; }
+    try{
+      await waitForXLSX(8000);
+    }catch(e){
+      const reason = e.message==='load-error'
+        ? `Failed to load Excel library from "${path}" — check that this exact file exists in your deployed repo (path + capitalization must match exactly).`
+        : `Excel library at "${path}" is taking too long to load — check your connection and try again.`;
+      toast('⚠️ '+reason, 6000);
+      if(btn){ btn.disabled=false; btn.textContent='📊 Export Excel (.xlsx)'; }
+      return;
+    }
+    if(btn){ btn.disabled=false; btn.textContent='📊 Export Excel (.xlsx)'; }
+  }
+  const wb=XLSX.utils.book_new();
+
+  // Sheet 1: Transactions
+  const txnRows=expenses.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(e=>({
+    'Transaction ID':e.id, 'Date':e.date, 'Time':e.time||'', 'Type':e.transactionType,
+    'Category':e.category||'', 'Subcategory':e.subcategory||'', 'Merchant':e.merchant||'',
+    'Amount':e.amount, 'Payment Type':e.paymentType||'', 'Payment Source':e.paymentSource||'',
+    'UTR':e.utr||'', 'Transaction Reference':e.transactionReference||'', 'Import Source':e.importSource||'',
+    'Reconciliation Status':e.reconciliationStatus||'', 'Attachment Count':(e.attachmentIds||[]).length,
+    'Note':e.note||'', 'Created At':e.createdAt||'', 'Updated At':e.updatedAt||''
+  }));
+  const ws1=XLSX.utils.json_to_sheet(txnRows);
+  ws1['!cols']=[{wch:20},{wch:11},{wch:8},{wch:10},{wch:12},{wch:14},{wch:18},{wch:10},{wch:12},{wch:20},{wch:16},{wch:16},{wch:14},{wch:16},{wch:8},{wch:24},{wch:20},{wch:20}];
+  ws1['!freeze']={xSplit:0,ySplit:1}; ws1['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:Math.max(1,txnRows.length),c:17}})};
+  XLSX.utils.book_append_sheet(wb, ws1, 'Transactions');
+
+  // Sheet 2: Monthly Summary
+  const byMonth={};
+  expenses.forEach(e=>{
+    const key=e.date.slice(0,7);
+    byMonth[key]=byMonth[key]||{Income:0,Expenses:0,Investments:0,Transfers:0,Refunds:0,'Credit Card Payments':0};
+    const amt=e.amount;
+    if(e.transactionType==='Expense') byMonth[key].Expenses+=amt;
+    else if(e.transactionType==='Income') byMonth[key].Income+=amt;
+    else if(e.transactionType==='Investment') byMonth[key].Investments+=amt;
+    else if(e.transactionType==='Transfer') byMonth[key].Transfers+=amt;
+    else if(e.transactionType==='Refund') byMonth[key].Refunds+=amt;
+    else if(e.transactionType==='Credit Card Payment') byMonth[key]['Credit Card Payments']+=amt;
+  });
+  const monthRows=Object.keys(byMonth).sort().map(m=>{
+    const r=byMonth[m];
+    const netExpense=r.Expenses-r.Refunds;
+    return {'Month':m,'Income':r.Income,'Expenses':r.Expenses,'Investments':r.Investments,'Transfers':r.Transfers,
+      'Refunds':r.Refunds,'Credit Card Payments':r['Credit Card Payments'],
+      'Projected Savings':CFG.salary-CFG.fixed.reduce((a,x)=>a+x[1],0)-CFG.target,
+      'Actual Savings':CFG.salary-CFG.fixed.reduce((a,x)=>a+x[1],0)-netExpense};
+  });
+  const ws2=XLSX.utils.json_to_sheet(monthRows);
+  ws2['!cols']=[{wch:10},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:18},{wch:16},{wch:14}];
+  ws2['!freeze']={xSplit:0,ySplit:1};
+  XLSX.utils.book_append_sheet(wb, ws2, 'Monthly Summary');
+
+  // Sheet 3: Credit Cards
+  const cardRows=cardsList.map(c=>{
+    const pct=c.limit>0?Math.round((c.outstanding/c.limit)*100):0;
+    return {'Card':c.name,'Credit Limit':c.limit,'Outstanding':c.outstanding,'Available Limit':c.limit-c.outstanding,
+      'Utilization %':pct,'Statement Date':c.statementDate,'Due Date':c.dueDate,'Minimum Due':c.minDue,'Total Due':c.totalDue};
+  });
+  const ws3=XLSX.utils.json_to_sheet(cardRows);
+  ws3['!cols']=[{wch:26},{wch:13},{wch:13},{wch:15},{wch:13},{wch:13},{wch:11},{wch:13},{wch:11}];
+  ws3['!freeze']={xSplit:0,ySplit:1};
+  XLSX.utils.book_append_sheet(wb, ws3, 'Credit Cards');
+
+  // Sheet 4: Fixed Expenses
+  const fixedRows=CFG.fixed.map(x=>({'Expense':x[0],'Amount':x[1],'Frequency':'Monthly','Category':'Fixed'}));
+  const ws4=XLSX.utils.json_to_sheet(fixedRows);
+  ws4['!cols']=[{wch:24},{wch:11},{wch:11},{wch:11}];
+  XLSX.utils.book_append_sheet(wb, ws4, 'Fixed Expenses');
+
+  // Sheet 5: Payment Sources
+  const psRows=[];
+  Object.keys(PAYMENT_SOURCES).forEach(type=>PAYMENT_SOURCES[type].forEach(src=>psRows.push({'Payment Type':type,'Payment Source':src,'Status':'Active'})));
+  const ws5=XLSX.utils.json_to_sheet(psRows);
+  ws5['!cols']=[{wch:16},{wch:24},{wch:10}];
+  XLSX.utils.book_append_sheet(wb, ws5, 'Payment Sources');
+
+  const fname=`ArthSetu_Complete_Backup_${todayISO()}.xlsx`;
+  XLSX.writeFile(wb, fname);
+  toast('Excel exported: '+fname, 3000);
+}
+
+const money=n=>'₹'+Math.round(n).toLocaleString('en-IN');
+const todayISO=()=>new Date().toISOString().slice(0,10);
+document.getElementById('date').value=todayISO();
+document.getElementById('dateLine').textContent=new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'});
+document.getElementById('verLine').textContent=APP_VERSION;
+
+/* ===== Dashboard charts (Chart.js, self-hosted) ===== */
+let _charts={};
+function destroyChart(id){ if(_charts[id]){ _charts[id].destroy(); delete _charts[id]; } }
+const CHART_PALETTE=['#2E7D6B','#4FBBA3','#B8860B','#D0342C','#3A3A3C','#8A8A8E','#63CBB4','#E8B84B'];
+
+function renderDashboardCharts(){
+  if(typeof Chart==='undefined') return; // library still loading (defer) — retried after boot below
+  const me=monthExpenses().filter(e=>e.transactionType==='Expense');
+  const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const fg = isDark ? '#F2F2F7' : '#1C1C1E';
+  Chart.defaults.color = fg;
+  Chart.defaults.font.family = "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif";
+
+  // Category donut
+  const byCat={};
+  me.forEach(e=>{ byCat[e.category||'Miscellaneous']=(byCat[e.category||'Miscellaneous']||0)+e.amount; });
+  const catLabels=Object.keys(byCat), catData=catLabels.map(k=>byCat[k]);
+  destroyChart('cat');
+  _charts.cat = new Chart(document.getElementById('chartCategory'), {
+    type:'doughnut',
+    data:{ labels: catLabels.length?catLabels:['No data'], datasets:[{ data: catData.length?catData:[1], backgroundColor: CHART_PALETTE, borderWidth:0 }] },
+    options:{ plugins:{ legend:{ position:'bottom', labels:{boxWidth:10,padding:12} },
+      tooltip:{ callbacks:{ label: ctx => catData.length ? `${ctx.label}: ${money(ctx.parsed)}` : 'No expenses yet this month' } } } }
+  });
+
+  // Payment source bar
+  const byPs={};
+  me.forEach(e=>{ const k=e.paymentSource||e.paymentType||'Other'; byPs[k]=(byPs[k]||0)+e.amount; });
+  const psLabels=Object.keys(byPs), psData=psLabels.map(k=>byPs[k]);
+  destroyChart('ps');
+  _charts.ps = new Chart(document.getElementById('chartPaymentSource'), {
+    type:'bar',
+    data:{ labels: psLabels.length?psLabels:['No data'], datasets:[{ data: psData.length?psData:[0], backgroundColor:'#2E7D6B', borderRadius:6 }] },
+    options:{ indexAxis:'y', plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => money(ctx.parsed.x) } } },
+      scales:{ x:{ ticks:{ callback: v=>'₹'+v }, grid:{color: isDark?'rgba(255,255,255,.08)':'rgba(0,0,0,.06)'} }, y:{ grid:{display:false} } } }
+  });
+
+  // 6-month expense trend
+  const now=new Date(), months=[];
+  for(let i=5;i>=0;i--){ const d=new Date(now.getFullYear(),now.getMonth()-i,1); months.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')); }
+  const monthTotals=months.map(key=>expenses.filter(e=>e.transactionType==='Expense' && e.date.slice(0,7)===key).reduce((a,e)=>a+e.amount,0));
+  const monthLabels=months.map(k=>{ const [y,m]=k.split('-'); return new Date(y,m-1,1).toLocaleDateString('en-IN',{month:'short'}); });
+  destroyChart('trend');
+  _charts.trend = new Chart(document.getElementById('chartTrend'), {
+    type:'line',
+    data:{ labels: monthLabels, datasets:[{ data: monthTotals, borderColor:'#2E7D6B', backgroundColor:'rgba(46,125,107,0.12)', fill:true, tension:.35, pointRadius:3 }] },
+    options:{ plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => money(ctx.parsed.y) } } },
+      scales:{ y:{ ticks:{ callback: v=>'₹'+v }, grid:{color: isDark?'rgba(255,255,255,.08)':'rgba(0,0,0,.06)'} }, x:{ grid:{display:false} } } }
+  });
+}
+
+function monthRange(){
+ const now=new Date(), y=now.getFullYear(), m=now.getMonth();
+ const end=new Date(y,m+1,0);
+ return {y,m,days:end.getDate(),today:now.getDate()};
+}
+function monthExpenses(){
+ const {y,m}=monthRange();
+ return expenses.filter(e=>{const d=new Date(e.date+'T00:00:00');return d.getFullYear()===y&&d.getMonth()===m});
+}
+function variableBudget(){return CFG.salary-CFG.fixed.reduce((a,x)=>a+x[1],0)-CFG.target}
+
+const RING_C = 2*Math.PI*78;
+
+function recalc(){
+ const me=monthExpenses(), spent=me.reduce((a,e)=>a+spendDelta(e),0), vb=variableBudget();
+ const {days,today}=monthRange(), remainingDays=Math.max(1,days-today+1);
+ const remaining=Math.max(0,vb-spent);
+ const daily=remaining/remainingDays;
+ const projected=CFG.salary-CFG.fixed.reduce((a,x)=>a+x[1],0)-(spent/Math.max(1,today))*days;
+ const expectedSaving=projected;
+
+ document.getElementById('salary').textContent=money(CFG.salary);
+ document.getElementById('salarySettings').textContent=CFG.salary.toLocaleString('en-IN');
+ document.getElementById('fixed').textContent=money(CFG.fixed.reduce((a,x)=>a+x[1],0));
+ document.getElementById('spent').textContent=money(spent);
+ document.getElementById('expectedSaving').textContent=money(expectedSaving);
+ document.getElementById('todayBudget').textContent=money(daily)+'/day';
+ const ts=me.filter(e=>e.date===todayISO()).reduce((a,e)=>a+spendDelta(e),0);
+ document.getElementById('todaySpent').textContent=money(ts);
+ document.getElementById('todayRemaining').textContent=money(Math.max(0,daily-ts));
+
+ const state = expectedSaving>=CFG.target?'safe':expectedSaving>=CFG.target-2000?'caution':'danger';
+ const pill=document.getElementById('statusPill');
+ pill.className='pill '+state;
+ pill.textContent = state==='safe'?'🛡️ SAFE':state==='caution'?'⚠️ CAUTION':'🚨 DANGER';
+ document.getElementById('statusText').textContent = state==='safe'
+   ? 'Your ₹'+CFG.target.toLocaleString('en-IN')+' target is currently protected.'
+   : `Target risk: ${money(CFG.target-expectedSaving)} short at current pace.`;
+
+ const ringColor = state==='safe'?'var(--green)':state==='caution'?'var(--amber)':'var(--red)';
+ const pct = Math.min(1, Math.max(0, expectedSaving/CFG.target));
+ const bar=document.getElementById('ringBar');
+ bar.style.stroke=ringColor;
+ bar.setAttribute('stroke-dasharray', RING_C.toFixed(1));
+ bar.style.strokeDashoffset = (RING_C*(1-pct)).toFixed(1);
+
+ renderHistory(me);
+ renderSettingsStats();
+ renderDashboardCharts();
+}
+
+const TXN_ICON={Expense:'',Income:'💰',Transfer:'↔️',Refund:'↩️',Investment:'📈','Credit Card Payment':'💳'};
+function renderHistory(me){
+ const sorted=me.slice().sort((a,b)=>b.date.localeCompare(a.date)||(new Date(b.createdAt||0)-new Date(a.createdAt||0)));
+ document.getElementById('histCount').textContent=sorted.length;
+ document.getElementById('historyList').innerHTML = sorted.length ? sorted.map(e=>{
+   const title=[e.merchant, e.category, e.subcategory].filter(Boolean).join(' · ') || e.category || 'Miscellaneous';
+   const sub=[e.date.slice(5), e.paymentSource||e.paymentType, e.note].filter(Boolean).join(' · ');
+   const sign = e.transactionType==='Refund' ? '−' : (e.transactionType==='Income' ? '+' : '');
+   const hasAttachment = e.attachmentIds && e.attachmentIds.length>0;
+   return `
+   <div class="list-row tap" onclick="openTxnDetail('${e.id}')">
+     <div><div>${TXN_ICON[e.transactionType]||''} ${escapeHtml(title)}${hasAttachment?' 📎':''}</div><div class="meta">${escapeHtml(sub)}</div></div>
+     <div class="amt">${sign}${money(e.amount)}</div>
+   </div>`;
+ }).join('') : `<div class="empty">No transactions yet this month.</div>`;
+}
+function escapeHtml(s){return s.replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+
+/* ===== Transaction detail view (with attachment view/replace/delete) ===== */
+let _detailTxnId=null;
+async function openTxnDetail(txnId){
+  const e=expenses.find(x=>x.id===txnId); if(!e) return;
+  _detailTxnId=txnId;
+  const sourceLabel = {
+    'screenshot-ocr':'📷 Imported from Screenshot', 'bank-pdf':'🏦 Imported from Bank Statement',
+    'card-pdf':'💳 Imported from Credit Card Statement', 'manual':'✍️ Manual entry',
+    'legacy-migrated':'✍️ Manual entry (older record)', 'quick-travel':'✍️ Quick travel entry'
+  }[e.importSource] || '';
+  document.getElementById('detailBody').innerHTML = `
+    <div class="ring-amt" style="text-align:center; margin:6px 0 2px">${money(e.amount)}</div>
+    <div class="footnote" style="text-align:center; margin-bottom:14px">${escapeHtml(e.transactionType)}${sourceLabel?' · '+sourceLabel:''}</div>
+    <div class="group">
+      <div class="cell"><span class="l">Date</span><span class="r">${e.date}${e.time?' · '+escapeHtml(e.time):''}</span></div>
+      ${e.category?`<div class="cell"><span class="l">Category</span><span class="r">${escapeHtml(e.category)}${e.subcategory?' · '+escapeHtml(e.subcategory):''}</span></div>`:''}
+      ${e.merchant?`<div class="cell"><span class="l">Merchant</span><span class="r">${escapeHtml(e.merchant)}</span></div>`:''}
+      <div class="cell"><span class="l">Payment</span><span class="r">${escapeHtml(e.paymentType||'')}${e.paymentSource?' · '+escapeHtml(e.paymentSource):''}</span></div>
+      ${e.utr?`<div class="cell"><span class="l">UTR / Ref</span><span class="r">${escapeHtml(e.utr)}</span></div>`:''}
+      <div class="cell"><span class="l">Reconciliation</span><span class="r">${escapeHtml(e.reconciliationStatus||'Unmatched')}</span></div>
+      ${e.note?`<div class="cell"><span class="l">Note</span><span class="r">${escapeHtml(e.note)}</span></div>`:''}
+    </div>
+    <div class="group-label eyebrow">Attachments</div>
+    <div class="group" id="detailAttachments"><div class="cell"><span class="l footnote">Loading…</span></div></div>
+    <div class="stack" style="margin-top:14px">
+      <button class="btn secondary" onclick="document.getElementById('replaceAttachmentFile').click()">${(e.attachmentIds&&e.attachmentIds.length)?'🔄 Replace attachment':'📎 Add attachment'}</button>
+      <input id="replaceAttachmentFile" type="file" accept="image/*" style="display:none" onchange="replaceDetailAttachment(event)">
+    </div>
+  `;
+  document.getElementById('detailWrap').classList.remove('hide');
+  renderDetailAttachments(e);
+}
+async function renderDetailAttachments(e){
+  const box=document.getElementById('detailAttachments');
+  if(!e.attachmentIds || !e.attachmentIds.length){
+    box.innerHTML=`<div class="cell"><span class="l footnote">No attachments</span></div>`; return;
+  }
+  const rows=await Promise.all(e.attachmentIds.map(async id=>{
+    const att=await getAttachment(id);
+    if(!att) return '';
+    const url=URL.createObjectURL(att.blob);
+    return `<div class="cell">
+      <div style="display:flex;align-items:center;gap:10px;flex:1">
+        <img src="${url}" style="width:44px;height:44px;object-fit:cover;border-radius:8px" onclick="window.open('${url}','_blank')">
+        <div><div class="footnote">${escapeHtml(att.filename)}</div><div class="footnote">${Math.round(att.size/1024)} KB</div></div>
+      </div>
+      <button class="link-btn" style="color:var(--red)" onclick="deleteDetailAttachment('${id}')">Delete</button>
+    </div>`;
+  }));
+  box.innerHTML = rows.join('') || `<div class="cell"><span class="l footnote">No attachments</span></div>`;
+}
+async function replaceDetailAttachment(ev){
+  const file=ev.target.files[0]; if(!file || !_detailTxnId) return;
+  const e=expenses.find(x=>x.id===_detailTxnId); if(!e) return;
+  try{
+    const compressed=await compressImage(file);
+    // remove old attachments first (replace, not add-alongside)
+    if(e.attachmentIds && e.attachmentIds.length){
+      await Promise.all(e.attachmentIds.map(id=>deleteAttachment(id).catch(()=>{})));
+    }
+    const newId=await saveAttachment(e.id, compressed, {filename:(file.name||'receipt')+'.jpg'});
+    e.attachmentIds=[newId];
+    persist(); renderHistory(monthExpenses());
+    renderDetailAttachments(e);
+    toast('Attachment updated');
+  }catch(err){ console.error(err); toast('⚠️ Could not save attachment'); }
+  ev.target.value='';
+}
+async function deleteDetailAttachment(attachmentId){
+  if(!confirm('Remove this attachment?')) return;
+  const e=expenses.find(x=>x.id===_detailTxnId); if(!e) return;
+  await deleteAttachment(attachmentId).catch(()=>{});
+  e.attachmentIds=(e.attachmentIds||[]).filter(id=>id!==attachmentId);
+  persist(); renderHistory(monthExpenses());
+  renderDetailAttachments(e);
+  toast('Attachment removed');
+}
+function closeTxnDetail(){ document.getElementById('detailWrap').classList.add('hide'); _detailTxnId=null; }
+
+function renderSettingsStats(){
+ document.getElementById('entryCount').textContent=expenses.length;
+ const ls=localStorage.getItem('savingGuardLastSaved');
+ document.getElementById('lastSaved').textContent = ls ? new Date(ls).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '—';
+ const lb=localStorage.getItem(BACKUP_KEY);
+ document.getElementById('lastBackup').textContent = lb ? new Date(lb).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) : 'Never';
+}
+
+function makeTxn(fields){
+  const now=new Date().toISOString();
+  const t={
+    id: uid(), date: fields.date, time: fields.time || null,
+    amount: fields.amount, transactionType: fields.transactionType || 'Expense',
+    category: fields.category || '', subcategory: fields.subcategory || '',
+    merchant: fields.merchant || '', paymentType: fields.paymentType || 'Other',
+    paymentSource: fields.paymentSource || '', utr: fields.utr || '',
+    transactionReference: fields.transactionReference || '', note: fields.note || '',
+    importSource: fields.importSource || 'manual', reconciliationStatus: 'Unmatched',
+    attachmentIds: [], createdAt: now, updatedAt: now
+  };
+  t.fingerprint = computeFingerprint(t);
+  return t;
+}
+
+function onTypeChange(){
+  const t=transactionType.value;
+  const isSpendLike = t==='Expense' || t==='Refund';
+  document.getElementById('categoryGroup').classList.toggle('hide', !isSpendLike);
+  document.getElementById('categoryGroupLabel').classList.toggle('hide', !isSpendLike);
+}
+function populateCategorySelect(){
+  category.innerHTML = Object.keys(CATEGORIES).map(c=>`<option>${c}</option>`).join('');
+  onCategoryChange();
+}
+function onCategoryChange(){
+  const subs=CATEGORIES[category.value]||[];
+  subcategory.innerHTML = subs.map(s=>`<option>${s}</option>`).join('');
+}
+function populatePaymentTypeOptions(){ onPaymentTypeChange(); }
+function onPaymentTypeChange(){
+  const t=paymentType.value;
+  const sources = t==='Card'
+    ? Object.keys(CFG.cards).length ? Object.keys(CFG.cards) : PAYMENT_SOURCES.Card
+    : (PAYMENT_SOURCES[t] || ['Other']);
+  paymentSource.innerHTML = sources.map(s=>`<option>${s}</option>`).join('');
+  document.getElementById('paymentSourceField').classList.toggle('hide', t==='Cash');
+}
+function updateMerchantList(){
+  const names=[...new Set(expenses.map(e=>e.merchant).filter(Boolean))].sort();
+  document.getElementById('merchantList').innerHTML = names.map(n=>`<option value="${escapeHtml(n)}">`).join('');
+}
+
+/* ===== Screenshot scan → OCR → review-prefill flow ===== */
+let pendingAttachment=null; // { blob, filename, ocrText }
+
+async function handleReceiptFile(ev){
+  const file=ev.target.files[0]; if(!file) return;
+  const btn=document.getElementById('scanReceiptBtn');
+  const statusEl=document.getElementById('ocrStatus');
+  statusEl.classList.remove('hide'); statusEl.textContent='📖 Reading receipt…';
+  btn.disabled=true;
+
+  try{
+    const compressed=await compressImage(file);
+    pendingAttachment={ blob:compressed, filename:(file.name||'receipt')+'.jpg' };
+    showAttachmentPreview(compressed);
+
+    if(typeof Tesseract==='undefined'){
+      statusEl.textContent='⚠️ OCR library not loaded — screenshot will still be attached, but fields won\'t auto-fill. Fill them in manually.';
+      btn.disabled=false; ev.target.value=''; return;
+    }
+
+    const worker = await getTesseractWorker();
+    const { data:{ text } } = await worker.recognize(compressed);
+    const extracted = extractFromOCRText(text);
+
+    if(extracted.amount) amount.value=extracted.amount;
+    const parsedDate=parseGuessedDate(extracted.date);
+    if(parsedDate) date.value=parsedDate;
+    if(extracted.merchant) merchant.value=extracted.merchant;
+    if(extracted.utr) utr.value=extracted.utr;
+
+    const foundAny = extracted.amount||parsedDate||extracted.merchant||extracted.utr;
+    if(foundAny){
+      statusEl.textContent='✓ Some fields guessed from the screenshot — please verify below before saving.';
+      document.getElementById('reviewNote').classList.remove('hide');
+    }else{
+      statusEl.textContent='Could not confidently read any fields — please fill them in manually. Screenshot will still be attached.';
+    }
+  }catch(e){
+    console.error(e);
+    statusEl.textContent='⚠️ Could not process the image — you can still fill the form manually.';
+  }finally{
+    btn.disabled=false; ev.target.value='';
+  }
+}
+
+let _tessWorker=null;
+async function getTesseractWorker(){
+  if(_tessWorker) return _tessWorker;
+  _tessWorker = await Tesseract.createWorker('eng', 1, {
+    workerPath: './lib/tesseract-worker.min.js',
+    corePath: './lib/tesseract-core-lstm.wasm.js',
+    langPath: './lib',
+    gzip: true
+  });
+  return _tessWorker;
+}
+
+function showAttachmentPreview(blob){
+  const url=URL.createObjectURL(blob);
+  const img=document.getElementById('attachmentThumb');
+  if(img.dataset.prevUrl) URL.revokeObjectURL(img.dataset.prevUrl);
+  img.src=url; img.dataset.prevUrl=url;
+  document.getElementById('attachmentInfo').textContent = `${Math.round(blob.size/1024)} KB — will be saved with this transaction`;
+  document.getElementById('attachmentPreview').classList.remove('hide');
+}
+function removePendingAttachment(){
+  pendingAttachment=null;
+  document.getElementById('attachmentPreview').classList.add('hide');
+  document.getElementById('reviewNote').classList.add('hide');
+  document.getElementById('ocrStatus').classList.add('hide');
+}
+
+function addExpense(ev){
+ ev.preventDefault();
+ const amt=+amount.value;
+ if(!amt || amt<=0) return;
+ const isSpendLike = transactionType.value==='Expense' || transactionType.value==='Refund';
+ const attachmentToSave = pendingAttachment; // capture before form reset clears UI state
+ const txn=makeTxn({
+   date: date.value, amount: amt, transactionType: transactionType.value,
+   category: isSpendLike ? category.value : '', subcategory: isSpendLike ? subcategory.value : '',
+   merchant: merchant.value.trim(), paymentType: paymentType.value, paymentSource: paymentSource.value,
+   utr: utr.value.trim(), note: note.value.trim(),
+   importSource: attachmentToSave ? 'screenshot-ocr' : 'manual'
+ });
+ expenses.push(txn);
+ const ok=persist();
+ updateMerchantList();
+ ev.target.reset(); date.value=todayISO();
+ populateCategorySelect(); onPaymentTypeChange(); onTypeChange();
+ removePendingAttachment();
+ recalc();
+ toast(ok?`✓ Saved — ${expenses.length} entries stored`:'⚠️ Save may have failed — check storage');
+ odAutoSyncIfConnected();
+ go('home');
+
+ if(attachmentToSave){
+   saveAttachment(txn.id, attachmentToSave.blob, {filename:attachmentToSave.filename})
+     .then(attachmentId=>{
+       const idx=expenses.findIndex(x=>x.id===txn.id);
+       if(idx>-1){ expenses[idx].attachmentIds=[attachmentId]; persist(); renderHistory(monthExpenses()); }
+     })
+     .catch(e=>{ console.error('Attachment save failed', e); toast('⚠️ Screenshot could not be saved as attachment',4000); });
+ }
+}
+function addTravel(type){
+ const txn=makeTxn({
+   date:todayISO(), amount:type==='Bus'?CFG.bus:CFG.bike, transactionType:'Expense',
+   category:'Travel', subcategory:type, paymentType:'Other', note:type, importSource:'quick-travel'
+ });
+ expenses.push(txn);
+ const ok=persist();
+ recalc();
+ toast(ok?`✓ Saved — ${expenses.length} entries stored`:'⚠️ Save may have failed');
+ odAutoSyncIfConnected();
+}
+function clearAll(){
+ if(confirm('Delete all saved expenses for this browser? Export a backup first if unsure.')){
+   expenses=[]; persist(); recalc(); toast('Month reset');
+ }
+}
+function toast(msg, ms){
+ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+ clearTimeout(toast._h); toast._h=setTimeout(()=>t.classList.remove('show'),ms||2200);
+}
+
+/* ===== Navigation ===== */
+function go(name){
+ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+ document.getElementById('screen-'+name).classList.add('active');
+ document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
+ window.scrollTo(0,0);
+}
+
+/* ===== Settings actions ===== */
+function exportData(){
+  const payload={app:"ArthSetu",version:APP_VERSION,exportedAt:new Date().toISOString(),config:CFG,expenses};
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='arthsetu-backup-'+todayISO()+'.json'; a.click(); URL.revokeObjectURL(a.href);
+  localStorage.setItem(BACKUP_KEY, new Date().toISOString());
+  renderSettingsStats();
+  toast('Backup exported');
+}
+function importData(ev){
+  const file=ev.target.files[0]; if(!file)return;
+  const r=new FileReader();
+  r.onload=()=>{try{
+    const p=JSON.parse(r.result);
+    if(!Array.isArray(p.expenses)) throw new Error('Invalid backup');
+    expenses=p.expenses.filter(e=>e.date&&Number.isFinite(+e.amount)).map(e=>({...e,amount:+e.amount}));
+    persist(); recalc();
+    toast('Backup imported · '+expenses.length+' entries');
+  }catch(e){ toast('⚠️ Invalid backup file'); }};
+  r.readAsText(file); ev.target.value='';
+}
+/* ===== OneDrive auto-sync (Microsoft Graph, personal accounts) =====
+   SETUP: replace ONEDRIVE_CLIENT_ID below with your Azure "Application (client) ID".
+   Redirect URI in Azure must exactly match this page's deployed URL (SPA platform). */
+const ONEDRIVE_CLIENT_ID = '747dd2f5-4df7-4329-b157-a6134d0b79bb';
+// Fixed to exactly match the Redirect URI registered in Azure — must be identical whether the
+// app is opened as a normal Safari tab or from the Home Screen icon (which loads index.html directly
+// and would otherwise produce a different pathname, causing a redirect_uri mismatch).
+const ONEDRIVE_REDIRECT_URI = 'https://pathaniaparveen1.github.io/Savings-Guard/';
+const OD_SCOPES = ['Files.ReadWrite.AppFolder'];
+let msalApp=null, odAccount=null;
+
+function odConfigured(){ return ONEDRIVE_CLIENT_ID && ONEDRIVE_CLIENT_ID!=='YOUR_AZURE_CLIENT_ID'; }
+
+function initMsal(){
+  if(!odConfigured() || typeof msal==='undefined') return null;
+  if(!msalApp){
+    msalApp = new msal.PublicClientApplication({
+      auth:{ clientId:ONEDRIVE_CLIENT_ID, authority:'https://login.microsoftonline.com/consumers',
+             redirectUri: ONEDRIVE_REDIRECT_URI },
+      cache:{ cacheLocation:'localStorage' }
+    });
+  }
+  return msalApp;
+}
+
+async function onedriveConnect(){
+  if(!odConfigured()){ toast('⚠️ OneDrive Client ID not set yet',4000); return; }
+  if(typeof msal==='undefined'){ toast('⚠️ MSAL library did not load — check network/CDN block',4000); return; }
+  const app=initMsal();
+  try{
+    localStorage.setItem('odConnecting','1'); // survives the full-page redirect
+    await app.loginRedirect({scopes:OD_SCOPES});
+    // page navigates away here; nothing after this line runs until we come back
+  }catch(e){ toast('⚠️ '+(e && (e.errorCode||e.message) ? (e.errorCode||e.message) : 'OneDrive connect failed'),5000); console.error(e); }
+}
+
+async function odGetToken(){
+  const app=initMsal(); if(!app) return null;
+  const accounts=app.getAllAccounts();
+  if(!accounts.length) return null;
+  odAccount=accounts[0];
+  try{
+    const res=await app.acquireTokenSilent({scopes:OD_SCOPES, account:odAccount});
+    return res.accessToken;
+  }catch(e){
+    try{ await app.acquireTokenRedirect({scopes:OD_SCOPES, account:odAccount}); return null; } // navigates away
+    catch(e2){ return null; }
+  }
+}
+
+async function onedriveSyncNow(force){
+  const token=await odGetToken();
+  if(!token){ toast('⚠️ Not connected to OneDrive'); updateOdUI(false); return; }
+
+  // Safety check: don't silently overwrite a remote backup that has more entries than we do —
+  // this is exactly how a fresh/empty storage context (e.g. iOS keeps Home Screen app storage
+  // separate from Safari tab storage for the same URL) can wipe out a good cloud backup.
+  if(!force){
+    try{
+      const chk=await fetch('https://graph.microsoft.com/v1.0/me/drive/special/approot:/arthsetu-backup.json:/content',{headers:{'Authorization':'Bearer '+token}});
+      if(chk.ok){
+        const remote=await chk.json();
+        const remoteCount=(remote.expenses||[]).length;
+        if(remoteCount>expenses.length){
+          const ok=confirm(`OneDrive par ${remoteCount} entries hain, is device par sirf ${expenses.length}. Overwrite karne se OneDrive ka extra data mit jayega.\n\nOK = overwrite anyway\nCancel = ruk jao (pehle "Import backup" se remote data yahan la sakte hain)`);
+          if(!ok){ toast('Sync roka gaya — data safe hai',3000); return; }
+        }
+      }
+    }catch(e){ /* remote check failed (e.g. file doesn't exist yet) — safe to proceed */ }
+  }
+
+  const payload={app:"ArthSetu",version:APP_VERSION,exportedAt:new Date().toISOString(),config:CFG,expenses};
+  try{
+    const res=await fetch('https://graph.microsoft.com/v1.0/me/drive/special/approot:/arthsetu-backup.json:/content',{
+      method:'PUT',
+      headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+      body: JSON.stringify(payload,null,2)
+    });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    localStorage.setItem('odLastSync', new Date().toISOString());
+    updateOdUI(true);
+    toast('☁️ Synced to OneDrive');
+  }catch(e){ toast('⚠️ OneDrive sync failed'); console.error(e); }
+}
+
+function onedriveDisconnect(){
+  const app=initMsal();
+  const accounts = app ? app.getAllAccounts() : [];
+  accounts.forEach(a=>app.getAccountByHomeId ? null : null);
+  localStorage.removeItem('odAccountId'); localStorage.removeItem('odLastSync');
+  odAccount=null;
+  updateOdUI(false);
+  toast('OneDrive disconnected');
+}
+
+function updateOdUI(connected){
+  document.getElementById('odStatus').textContent = connected ? 'Connected' : 'Not connected';
+  document.getElementById('odConnectBtn').classList.toggle('hide', connected);
+  document.getElementById('odSyncBtn').classList.toggle('hide', !connected);
+  document.getElementById('odDisconnectBtn').classList.toggle('hide', !connected);
+  const ls=localStorage.getItem('odLastSync');
+  document.getElementById('odLastSync').textContent = ls ? new Date(ls).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '—';
+}
+
+// Auto-sync silently after each save, if already connected
+async function odAutoSyncIfConnected(){
+  if(!odConfigured()) return;
+  const app=initMsal(); if(!app) return;
+  if(app.getAllAccounts().length) onedriveSyncNow();
+}
+
+function editSalary(){
+  const v=prompt('Monthly in-hand salary (₹):',CFG.salary);
+  if(v!==null && Number(v)>0){CFG.salary=Number(v); localStorage.setItem(SALARY_KEY,CFG.salary); recalc(); toast('Salary updated');}
+}
+function showInstall(){document.getElementById('installBanner').classList.remove('hide'); go('home'); window.scrollTo({top:0,behavior:'smooth'});}
+function hideInstall(){document.getElementById('installBanner').classList.add('hide');}
+
+/* ===== Boot ===== */
+loadExpenses();
+loadCards();
+const savedSalary=Number(localStorage.getItem(SALARY_KEY));
+if(savedSalary>0) CFG.salary=savedSalary;
+document.getElementById('fixedList').innerHTML=CFG.fixed.map(x=>`<div class="cell"><span class="l">${x[0]}</span><span class="r">${money(x[1])}</span></div>`).join('');
+populateCategorySelect();
+onPaymentTypeChange();
+onTypeChange();
+updateMerchantList();
+renderCards();
+recalc();
+
+if(/iPhone|iPad|iPod/i.test(navigator.userAgent) && !window.navigator.standalone){
+  setTimeout(()=>document.getElementById('installBanner').classList.remove('hide'),700);
+}
+
+// Restore OneDrive connection state on load (msal script loads with `defer`, so wait for it)
+// Also completes the redirect-based login flow when we're coming back from Microsoft's login page.
+window.addEventListener('load', async ()=>{
+  renderDashboardCharts(); // Chart.js loads via `defer`, so retry now that it's definitely available
+
+  // Enable/report the Excel export button based on actual load outcome (not a blind assumption)
+  const excelBtn=document.getElementById('exportExcelBtn');
+  if(excelBtn){
+    try{
+      await waitForXLSX(6000);
+      excelBtn.disabled=false; excelBtn.textContent='📊 Export Excel (.xlsx)';
+    }catch(e){
+      const path=(window.__libStatus && window.__libStatus.xlsxPath) || './lib/xlsx.full.min.js';
+      excelBtn.disabled=false; // let them retry manually — exportExcel() will re-check and report clearly
+      excelBtn.textContent='📊 Export Excel (.xlsx)';
+      if(e.message==='load-error'){
+        console.error('Excel library failed to load from', path);
+      }
+    }
+  }
+  if(!odConfigured() || typeof msal==='undefined'){ updateOdUI(false); return; }
+  const app=initMsal();
+  try{
+    const res = await app.handleRedirectPromise(); // processes the #code=... fragment if present, else resolves null
+    if(res && res.account){
+      odAccount=res.account;
+      localStorage.setItem('odAccountId', odAccount.homeAccountId);
+      localStorage.removeItem('odConnecting');
+      toast('OneDrive connected');
+      updateOdUI(true);
+      go('cards'); // land somewhere sensible after the round-trip back from Microsoft
+      onedriveSyncNow();
+      return;
+    }
+  }catch(e){
+    localStorage.removeItem('odConnecting');
+    toast('⚠️ '+(e && (e.errorCode||e.message) ? (e.errorCode||e.message) : 'OneDrive login failed'),5000);
+    console.error(e);
+  }
+  updateOdUI(app.getAllAccounts().length>0);
+  if(localStorage.getItem('odConnecting')){
+    // we expected a redirect back but got a normal fresh load instead — clear the stale flag
+    localStorage.removeItem('odConnecting');
+  }
+});
+
+/* ===== Service worker: network-first app shell, with update prompt ===== */
+if(location.protocol==='https:' || location.hostname==='localhost'){
+  navigator.serviceWorker?.register('./sw.js').then(reg=>{
+    reg.addEventListener('updatefound', ()=>{
+      const nw=reg.installing;
+      nw?.addEventListener('statechange', ()=>{
+        if(nw.state==='installed' && navigator.serviceWorker.controller){
+          document.getElementById('updateBanner').classList.remove('hide');
+        }
+      });
+    });
+  }).catch(()=>{});
+}
+</script>
+</body>
+</html>
