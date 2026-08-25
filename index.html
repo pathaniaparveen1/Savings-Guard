@@ -15,8 +15,8 @@
 <script>
   // Track load success/failure per library with the EXACT path, so failures are diagnosable
   // instead of a generic "didn't load" message. Populated by onload/onerror below.
-  window.__libStatus = { xlsx: 'loading', chart: 'loading', tesseract: 'loading',
-    xlsxPath: './lib/xlsx.full.min.js', chartPath: './lib/chart.umd.js', tesseractPath: './lib/tesseract.min.js' };
+  window.__libStatus = { xlsx: 'loading', chart: 'loading', tesseract: 'loading', pdfjs: 'loading',
+    xlsxPath: './lib/xlsx.full.min.js', chartPath: './lib/chart.umd.js', tesseractPath: './lib/tesseract.min.js', pdfjsPath: './lib/pdf.min.js' };
 </script>
 <script src="./lib/xlsx.full.min.js" defer
   onload="window.__libStatus.xlsx='loaded'"
@@ -27,6 +27,9 @@
 <script src="./lib/tesseract.min.js" defer
   onload="window.__libStatus.tesseract='loaded'"
   onerror="window.__libStatus.tesseract='error'"></script>
+<script src="./lib/pdf.min.js" defer
+  onload="window.__libStatus.pdfjs='loaded'"
+  onerror="window.__libStatus.pdfjs='error'"></script>
 <style>
 /* ===== Design tokens ===== */
 :root{
@@ -80,6 +83,8 @@ body{
 @media(prefers-reduced-motion:reduce){.screen.active{animation:none}}
 
 .group-label{margin:22px 6px 8px}
+.drop-zone{border:1.5px dashed var(--sep); border-radius:var(--radius-lg); padding:12px; transition:border-color .2s, background .2s}
+.drop-zone.drag-over{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent)}
 .group{background:var(--card); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow)}
 .cell{display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:0.5px solid var(--sep); gap:12px}
 .cell:last-child{border-bottom:none}
@@ -232,13 +237,17 @@ body{
 <section id="screen-add" class="screen">
   <div class="navbar" data-nav="add"><div class="row"><div><div class="large-title">Add transaction</div></div></div></div>
   <div style="padding-top:16px">
-    <div class="stack" style="margin-top:0">
-      <button class="btn secondary" id="scanReceiptBtn" onclick="document.getElementById('receiptFile').click()">📷 Scan receipt / screenshot</button>
-      <input id="receiptFile" type="file" accept="image/*" style="display:none" onchange="handleReceiptFile(event)">
+    <div id="receiptDropZone" class="drop-zone" ondragover="onReceiptDragOver(event)" ondragleave="onReceiptDragLeave(event)" ondrop="onReceiptDrop(event)">
+      <div class="stack" style="margin-top:0">
+        <button class="btn secondary" id="scanReceiptBtn" onclick="document.getElementById('receiptFile').click()">📷 Scan receipt / screenshot / PDF</button>
+        <input id="receiptFile" type="file" accept="image/*,application/pdf" multiple style="display:none" onchange="handleReceiptFiles(event)">
+      </div>
+      <div class="footnote" style="text-align:center; margin-top:8px" id="dropHint">or drag &amp; drop screenshots/PDFs here (works best on Mac/desktop browser)</div>
     </div>
     <div id="ocrStatus" class="footnote hide" style="margin:8px 6px 0"></div>
     <div id="attachmentPreview" class="group hide" style="margin-top:10px; padding:10px 12px; display:flex; align-items:center; gap:10px">
       <img id="attachmentThumb" style="width:52px; height:52px; object-fit:cover; border-radius:8px; flex-shrink:0">
+      <div id="attachmentThumbPdf" class="hide" style="width:52px; height:52px; border-radius:8px; flex-shrink:0; background:var(--paper); display:flex; align-items:center; justify-content:center; font-size:22px">📄</div>
       <div style="flex:1; min-width:0">
         <div class="headline" style="font-size:14px">📎 Screenshot attached</div>
         <div class="footnote" id="attachmentInfo">Will be saved with this transaction</div>
@@ -269,6 +278,9 @@ body{
         <div class="field"><label>Merchant / Vendor (optional)</label>
           <input id="merchant" list="merchantList" placeholder="e.g. Mother Dairy, Amazon">
           <datalist id="merchantList"></datalist>
+        </div>
+        <div class="field"><label>This is a payment for (optional)</label>
+          <select id="billLink"></select>
         </div>
       </div>
 
@@ -339,6 +351,24 @@ body{
   </div>
 </div>
 
+<div id="billFormWrap" class="hide" style="position:fixed; inset:0; z-index:60; background:color-mix(in srgb, var(--ink) 40%, transparent); display:flex; align-items:flex-end">
+  <div style="background:var(--paper); width:100%; max-height:88vh; overflow:auto; border-radius:20px 20px 0 0; padding:14px 0 calc(20px + env(safe-area-inset-bottom))">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 16px 10px">
+      <div class="headline" id="billFormTitle">Add recurring bill</div>
+      <button class="link-btn" onclick="closeBillForm()">Close</button>
+    </div>
+    <div class="group" style="margin:0 16px; width:calc(100% - 32px)">
+      <div class="field"><label>Name</label><input id="bf_name" placeholder="e.g. Ganaur electricity"></div>
+      <div class="field"><label>Category</label><select id="bf_category"></select></div>
+      <div class="field"><label>Expected amount (₹)</label><input id="bf_amount" type="number" inputmode="numeric" placeholder="Used as estimate until actually paid"></div>
+    </div>
+    <div class="stack" style="margin:14px 16px 0">
+      <button class="btn primary" onclick="saveBillForm()">Save bill</button>
+      <button class="btn ghost hide" id="bf_deleteBtn" onclick="deleteBillForm()">Delete bill</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===================== HISTORY ===================== -->
 <section id="screen-history" class="screen">
   <div class="navbar" data-nav="history"><div class="row"><div><div class="large-title">History</div></div>
@@ -347,8 +377,9 @@ body{
     <div class="group-label eyebrow">This month · <span id="histCount">0</span> entries</div>
     <div class="group" id="historyList"></div>
 
-    <div class="group-label eyebrow">Fixed monthly expenses</div>
+    <div class="group-label eyebrow">Recurring bills · this month</div>
     <div class="group" id="fixedList"></div>
+    <div class="footnote" style="margin:8px 6px 0">🟢 Actual amount (already paid & logged) · 🟡 Estimated (not paid/logged yet this month) — manage bills in Settings.</div>
   </div>
 </section>
 
@@ -369,6 +400,13 @@ body{
       <div class="cell tap" onclick="editSalary()"><span class="l">Edit salary</span><span class="r">₹<span id="salarySettings">0</span> <span class="chev">›</span></span></div>
       <div class="cell tap" onclick="showInstall()"><span class="l">iPhone install help</span><span class="r chev">›</span></div>
     </div>
+
+    <div class="group-label eyebrow">Recurring bills</div>
+    <div class="stack" style="margin-top:0">
+      <button class="btn secondary" onclick="openBillForm()">➕ Add recurring bill</button>
+    </div>
+    <div id="billsSettingsList" style="margin-top:10px"></div>
+    <div class="footnote" style="margin:8px 6px 0">These are estimates used for projections until you log and link the actual payment each month. Edit the expected amount here any time — e.g. after a rent increase.</div>
 
     <div class="group-label eyebrow">Backup</div>
     <div class="stack" style="margin-top:0">
@@ -433,6 +471,22 @@ const CFG={
    "Tata Neu Infinity SBI Card": 0
  }
 };
+
+/* ===== Recurring bills (replaces the old static "fixed expenses" list) =====
+   Each bill has an EXPECTED amount used only as a projection placeholder. The current month's
+   real figure always comes from an actual transaction the user links to the bill once paid —
+   never from the stale estimate. See billStatusForMonth()/fixedTotalForMonth() below. */
+const RECURRING_KEY='savingGuardRecurringBills';
+let recurringBills=[];
+function loadRecurringBills(){
+  try{ recurringBills=JSON.parse(localStorage.getItem(RECURRING_KEY)||'null'); }catch(e){ recurringBills=null; }
+  if(!recurringBills){
+    // One-time migration: seed from the old static list so nothing is lost, each becomes an editable bill
+    recurringBills = CFG.fixed.map(([name,amount])=>({ id:uid(), name, category:'Miscellaneous', expectedAmount:amount }));
+    persistRecurringBills();
+  }
+}
+function persistRecurringBills(){ localStorage.setItem(RECURRING_KEY, JSON.stringify(recurringBills)); }
 
 // Vegetarian-only categories, per user's stated requirement.
 const CATEGORIES={
@@ -545,7 +599,43 @@ function compressImage(file, maxDim, quality){
   });
 }
 
-/* ===== OCR extraction — pure text parsing, testable independent of Tesseract/DOM ===== */
+/* ===== PDF receipt text extraction (pdf.js, self-hosted) =====
+   Most single-transaction receipt/invoice PDFs (emailed payment confirmations, e-statements)
+   are text-based, not scanned images — so this is direct text extraction, no OCR needed, and
+   generally more reliable than image OCR. The extracted text is fed through the SAME
+   extractFromOCRText()/detectPaymentInfo() parsers already used for screenshots. */
+let _pdfjsConfigured=false;
+function configurePdfJs(){
+  if(_pdfjsConfigured || typeof pdfjsLib==='undefined') return;
+  pdfjsLib.GlobalWorkerOptions.workerSrc='./lib/pdf.worker.min.js';
+  _pdfjsConfigured=true;
+}
+async function extractPdfText(file){
+  if(typeof pdfjsLib==='undefined') throw new Error('pdfjs-not-loaded');
+  configurePdfJs();
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  let text='';
+  const pageCount=Math.min(pdf.numPages, 5); // receipts are almost always 1 page; cap for safety
+  for(let i=1;i<=pageCount;i++){
+    const page=await pdf.getPage(i);
+    const content=await page.getTextContent();
+    // Reconstruct line breaks from each item's vertical position — pdf.js gives a flat list of
+    // text runs with no inherent newlines, so joining them all with a single space (as before)
+    // silently merges every line of the receipt into one long line and breaks label-based
+    // regexes like "Merchant: <name>" (it would swallow everything after it too).
+    let lastY=null;
+    content.items.forEach(it=>{
+      const y = it.transform ? it.transform[5] : null;
+      if(lastY!==null && y!==null && Math.abs(y-lastY)>2) text+='\n';
+      text += it.str + ' ';
+      lastY = y;
+    });
+    text += '\n';
+  }
+  return text;
+}
+
 function extractFromOCRText(text){
   const out={amount:null, date:null, time:null, merchant:null, utr:null};
   if(!text) return out;
@@ -572,11 +662,59 @@ function extractFromOCRText(text){
   const timeMatch = clean.match(/(\d{1,2}:\d{2}\s?(?:AM|PM|am|pm)?)/);
   if(timeMatch) out.time = timeMatch[1].trim();
 
-  // Merchant: look for "Paid to <name>" / "To <name>" on its own line
-  const merchMatch = clean.match(/(?:Paid\s*to|To)[:\s]+([A-Za-z][A-Za-z0-9 &.'-]{2,40})/i);
+  // Merchant: "Paid to <name>" / "To <name>" (UPI apps) or "Merchant: <name>" (receipts/invoices)
+  const merchMatch = clean.match(/(?:Paid\s*to|To)[:\s]+([A-Za-z][A-Za-z0-9 &.'-]{2,40})/i)
+    || clean.match(/Merchant[:\s]+([A-Za-z][A-Za-z0-9 &.'-]{2,40})/i);
   if(merchMatch) out.merchant = merchMatch[1].trim();
 
   return out;
+}
+
+// Detects payment app/card/bank from OCR text. Order matters: card-specific names are checked
+// before generic UPI app names (so "Tata Neu Infinity...SBI Card" doesn't get misread as the
+// "Tata Neu UPI" app), and a bare bank name is only used as a Bank Transfer fallback when no
+// UPI app or card was mentioned — a screenshot showing "Google Pay" backed by an HDFC account
+// is a UPI payment, not a bank transfer.
+function detectPaymentInfo(text){
+  const out={paymentType:null, paymentSource:null};
+  if(!text) return out;
+  const t=text.replace(/\r/g,'');
+
+  if(/Tata\s*Neu\s*Infinity/i.test(t)){ out.paymentType='Card'; out.paymentSource='Tata Neu Infinity SBI Card'; return out; }
+  if(/SBI\s*Simply\s*CLICK/i.test(t)){ out.paymentType='Card'; out.paymentSource='SBI SimplyCLICK Visa'; return out; }
+
+  const upiApps=[
+    [/Tata\s*Neu(?!\s*Infinity)/i,'Tata Neu UPI'],
+    [/Google\s*Pay/i,'Google Pay'],
+    [/Paytm/i,'Paytm'],
+    [/BHIM/i,'BHIM'],
+    [/Amazon\s*Pay/i,'Amazon Pay'],
+    [/PhonePe/i,'Other UPI'] // not in the user's own app list, but still recognizable if it appears
+  ];
+  for(const [re,label] of upiApps){
+    if(re.test(t)){ out.paymentType='UPI'; out.paymentSource=label; return out; }
+  }
+
+  const banks=[
+    [/HDFC\s*Bank/i,'HDFC Bank'],[/ICICI\s*Bank/i,'ICICI Bank'],[/\bSBI\b/i,'SBI'],
+    [/Axis\s*Bank/i,'Axis Bank'],[/\bPNB\b/i,'PNB']
+  ];
+  for(const [re,label] of banks){
+    if(re.test(t)){ out.paymentType='Bank Transfer'; out.paymentSource=label; return out; }
+  }
+  return out;
+}
+
+// Suggests category/subcategory by looking up the most recent past transaction with the same
+// (normalized) merchant name. Returns null if this merchant hasn't been seen before — a guess
+// with no basis is worse than no suggestion, per the "never silently assume" principle.
+function suggestCategoryForMerchant(merchant, expensesList){
+  if(!merchant) return null;
+  const norm=normalizeMerchant(merchant);
+  const matches=(expensesList||[]).filter(e=>e.category && normalizeMerchant(e.merchant)===norm && norm.length>0);
+  if(!matches.length) return null;
+  matches.sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0));
+  return { category: matches[0].category, subcategory: matches[0].subcategory||'' };
 }
 
 // Best-effort mapping of a free-text date guess ("16 Aug", "16/08/2026") to YYYY-MM-DD,
@@ -661,6 +799,7 @@ function persist(){
 }
 
 function spendDelta(e){
+  if(e.recurringBillId) return 0; // accounted for in the fixed-bills total instead — avoids double counting
   if(!SPEND_TYPES.has(e.transactionType)) return 0;
   return e.transactionType==='Refund' ? -e.amount : e.amount;
 }
@@ -732,6 +871,78 @@ function deleteCardForm(){
   if(confirm('Delete this card?')){ cardsList.splice(editingCardIndex,1); persistCards(); renderCards(); closeCardForm(); toast('Card deleted'); }
 }
 
+/* ===== Recurring bills: Settings management (add/edit/delete) ===== */
+let editingBillId=null;
+function openBillForm(billId){
+  editingBillId = billId || null;
+  const b = editingBillId ? recurringBills.find(x=>x.id===editingBillId) : {name:'',category:'Miscellaneous',expectedAmount:''};
+  document.getElementById('billFormTitle').textContent = editingBillId ? 'Edit recurring bill' : 'Add recurring bill';
+  bf_category.innerHTML = Object.keys(CATEGORIES).map(c=>`<option ${c===b.category?'selected':''}>${c}</option>`).join('');
+  bf_name.value=b.name||''; bf_amount.value=b.expectedAmount||'';
+  document.getElementById('bf_deleteBtn').classList.toggle('hide', !editingBillId);
+  document.getElementById('billFormWrap').classList.remove('hide');
+}
+function closeBillForm(){ document.getElementById('billFormWrap').classList.add('hide'); editingBillId=null; }
+function saveBillForm(){
+  const name=bf_name.value.trim();
+  if(!name){ toast('⚠️ Bill name required'); return; }
+  const amt=+bf_amount.value||0;
+  if(editingBillId){
+    const b=recurringBills.find(x=>x.id===editingBillId);
+    b.name=name; b.category=bf_category.value; b.expectedAmount=amt;
+  }else{
+    recurringBills.push({ id:uid(), name, category:bf_category.value, expectedAmount:amt });
+  }
+  persistRecurringBills(); renderBillsSettingsList(); populateBillLinkSelect(); recalc(); closeBillForm();
+  toast('Bill saved');
+}
+function deleteBillForm(){
+  if(!editingBillId) return;
+  if(confirm('Delete this recurring bill? Past transactions already linked to it are kept, just unlinked from future projections.')){
+    recurringBills=recurringBills.filter(x=>x.id!==editingBillId);
+    persistRecurringBills(); renderBillsSettingsList(); populateBillLinkSelect(); recalc(); closeBillForm();
+    toast('Bill deleted');
+  }
+}
+function renderBillsSettingsList(){
+  const wrap=document.getElementById('billsSettingsList'); if(!wrap) return;
+  if(!recurringBills.length){ wrap.innerHTML='<div class="group"><div class="empty">No recurring bills yet.</div></div>'; return; }
+  wrap.innerHTML = `<div class="group">` + recurringBills.map(b=>
+    `<div class="cell tap" onclick="openBillForm('${b.id}')"><span class="l">${escapeHtml(b.name)}</span><span class="r">~${money(b.expectedAmount)} <span class="chev">›</span></span></div>`
+  ).join('') + `</div>`;
+}
+
+/* ===== Recurring bills: this month's status (History screen) + quick "mark as paid" ===== */
+function renderRecurringBills(monthKey){
+  const wrap=document.getElementById('fixedList'); if(!wrap) return;
+  if(!recurringBills.length){ wrap.innerHTML='<div class="empty">No recurring bills set up. Add some in Settings.</div>'; return; }
+  wrap.innerHTML = recurringBills.map(b=>{
+    const s=billStatusForMonth(b, monthKey);
+    const dot = s.estimated ? '🟡' : '🟢';
+    const action = s.estimated
+      ? `<button class="link-btn" onclick="startBillPayment('${b.id}')">Log payment</button>`
+      : `<span class="footnote">Paid</span>`;
+    return `<div class="cell"><span class="l">${dot} ${escapeHtml(b.name)}</span>
+      <span class="r" style="display:flex;align-items:center;gap:8px">${money(s.amount)}${s.estimated?' (est.)':''} ${action}</span></div>`;
+  }).join('');
+}
+// Jumps to Add, pre-filled with this bill's usual category/amount and linked — the actual amount
+// paid this month replaces the estimate the moment this transaction is saved.
+function startBillPayment(billId){
+  const b=recurringBills.find(x=>x.id===billId); if(!b) return;
+  go('add');
+  transactionType.value='Expense'; onTypeChange();
+  category.value=b.category||'Miscellaneous'; onCategoryChange();
+  amount.value=b.expectedAmount||'';
+  billLink.value=billId;
+  toast('Fill in the actual amount, then save to mark this bill paid');
+}
+function populateBillLinkSelect(){
+  const sel=document.getElementById('billLink'); if(!sel) return;
+  sel.innerHTML = `<option value="">None — regular expense</option>` +
+    recurringBills.map(b=>`<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+}
+
 /* ===== Excel export (SheetJS, self-hosted) =====
    Sheets included only for data that actually exists today. Investments/Attachments/Reconciliation
    sheets will be added once those phases are implemented — an empty placeholder sheet would be
@@ -798,10 +1009,11 @@ async function exportExcel(){
   const monthRows=Object.keys(byMonth).sort().map(m=>{
     const r=byMonth[m];
     const netExpense=r.Expenses-r.Refunds;
+    const fixedForThisMonth=fixedTotalForMonth(m).total;
     return {'Month':m,'Income':r.Income,'Expenses':r.Expenses,'Investments':r.Investments,'Transfers':r.Transfers,
       'Refunds':r.Refunds,'Credit Card Payments':r['Credit Card Payments'],
-      'Projected Savings':CFG.salary-CFG.fixed.reduce((a,x)=>a+x[1],0)-CFG.target,
-      'Actual Savings':CFG.salary-CFG.fixed.reduce((a,x)=>a+x[1],0)-netExpense};
+      'Projected Savings':CFG.salary-fixedForThisMonth-CFG.target,
+      'Actual Savings':CFG.salary-fixedForThisMonth-netExpense};
   });
   const ws2=XLSX.utils.json_to_sheet(monthRows);
   ws2['!cols']=[{wch:10},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:18},{wch:16},{wch:14}];
@@ -819,11 +1031,16 @@ async function exportExcel(){
   ws3['!freeze']={xSplit:0,ySplit:1};
   XLSX.utils.book_append_sheet(wb, ws3, 'Credit Cards');
 
-  // Sheet 4: Fixed Expenses
-  const fixedRows=CFG.fixed.map(x=>({'Expense':x[0],'Amount':x[1],'Frequency':'Monthly','Category':'Fixed'}));
+  // Sheet 4: Recurring Bills (with this month's actual-vs-estimated status)
+  const {key:currentMonthKey}=monthRange();
+  const fixedRows=recurringBills.map(b=>{
+    const s=billStatusForMonth(b, currentMonthKey);
+    return {'Bill':b.name,'Category':b.category||'','Expected Amount':b.expectedAmount,
+      'This Month Actual/Estimate':s.amount,'Status':s.estimated?'Estimated (not yet paid)':'Actual (paid)'};
+  });
   const ws4=XLSX.utils.json_to_sheet(fixedRows);
-  ws4['!cols']=[{wch:24},{wch:11},{wch:11},{wch:11}];
-  XLSX.utils.book_append_sheet(wb, ws4, 'Fixed Expenses');
+  ws4['!cols']=[{wch:24},{wch:14},{wch:15},{wch:22},{wch:20}];
+  XLSX.utils.book_append_sheet(wb, ws4, 'Recurring Bills');
 
   // Sheet 5: Payment Sources
   const psRows=[];
@@ -897,27 +1114,45 @@ function renderDashboardCharts(){
 function monthRange(){
  const now=new Date(), y=now.getFullYear(), m=now.getMonth();
  const end=new Date(y,m+1,0);
- return {y,m,days:end.getDate(),today:now.getDate()};
+ return {y,m,days:end.getDate(),today:now.getDate(),key:y+'-'+String(m+1).padStart(2,'0')};
 }
 function monthExpenses(){
  const {y,m}=monthRange();
  return expenses.filter(e=>{const d=new Date(e.date+'T00:00:00');return d.getFullYear()===y&&d.getMonth()===m});
 }
-function variableBudget(){return CFG.salary-CFG.fixed.reduce((a,x)=>a+x[1],0)-CFG.target}
+
+// Recurring bills: each bill has an expected/typical amount for projections, but the CURRENT
+// month's actual figure comes from a real transaction the user logged and linked to that bill
+// (once paid) — never from the static estimate. This is what makes "assumed ₹400 electricity"
+// become "actual ₹500" the moment the real bill is paid and logged, instead of silently staying
+// wrong for the rest of the month.
+function billStatusForMonth(bill, monthKey){
+  const paid = expenses.find(e=>e.recurringBillId===bill.id && e.date && e.date.slice(0,7)===monthKey && e.transactionType==='Expense');
+  return paid ? {amount:paid.amount, estimated:false, txnId:paid.id} : {amount:bill.expectedAmount, estimated:true, txnId:null};
+}
+function fixedTotalForMonth(monthKey){
+  let total=0, unpaidCount=0;
+  recurringBills.forEach(b=>{ const s=billStatusForMonth(b,monthKey); total+=s.amount; if(s.estimated) unpaidCount++; });
+  return {total, unpaidCount};
+}
+function variableBudget(monthKey){ return CFG.salary-fixedTotalForMonth(monthKey).total-CFG.target }
 
 const RING_C = 2*Math.PI*78;
 
 function recalc(){
- const me=monthExpenses(), spent=me.reduce((a,e)=>a+spendDelta(e),0), vb=variableBudget();
- const {days,today}=monthRange(), remainingDays=Math.max(1,days-today+1);
+ const {days,today,key:monthKey}=monthRange();
+ const me=monthExpenses(), spent=me.reduce((a,e)=>a+spendDelta(e),0);
+ const {total:fixedTotal, unpaidCount}=fixedTotalForMonth(monthKey);
+ const vb=variableBudget(monthKey);
+ const remainingDays=Math.max(1,days-today+1);
  const remaining=Math.max(0,vb-spent);
  const daily=remaining/remainingDays;
- const projected=CFG.salary-CFG.fixed.reduce((a,x)=>a+x[1],0)-(spent/Math.max(1,today))*days;
+ const projected=CFG.salary-fixedTotal-(spent/Math.max(1,today))*days;
  const expectedSaving=projected;
 
  document.getElementById('salary').textContent=money(CFG.salary);
  document.getElementById('salarySettings').textContent=CFG.salary.toLocaleString('en-IN');
- document.getElementById('fixed').textContent=money(CFG.fixed.reduce((a,x)=>a+x[1],0));
+ document.getElementById('fixed').textContent=money(fixedTotal)+(unpaidCount?` (${unpaidCount} est.)`:'');
  document.getElementById('spent').textContent=money(spent);
  document.getElementById('expectedSaving').textContent=money(expectedSaving);
  document.getElementById('todayBudget').textContent=money(daily)+'/day';
@@ -943,6 +1178,7 @@ function recalc(){
  renderHistory(me);
  renderSettingsStats();
  renderDashboardCharts();
+ renderRecurringBills(monthKey);
 }
 
 const TXN_ICON={Expense:'',Income:'💰',Transfer:'↔️',Refund:'↩️',Investment:'📈','Credit Card Payment':'💳'};
@@ -1060,6 +1296,7 @@ function makeTxn(fields){
     paymentSource: fields.paymentSource || '', utr: fields.utr || '',
     transactionReference: fields.transactionReference || '', note: fields.note || '',
     importSource: fields.importSource || 'manual', reconciliationStatus: 'Unmatched',
+    recurringBillId: fields.recurringBillId || null,
     attachmentIds: [], createdAt: now, updatedAt: now
   };
   t.fingerprint = computeFingerprint(t);
@@ -1097,26 +1334,84 @@ function updateMerchantList(){
 /* ===== Screenshot scan → OCR → review-prefill flow ===== */
 let pendingAttachment=null; // { blob, filename, ocrText }
 
-async function handleReceiptFile(ev){
-  const file=ev.target.files[0]; if(!file) return;
+let receiptQueue=[]; // remaining files to process, for multi-screenshot batch scans
+let receiptQueueTotal=0;
+
+function startReceiptQueue(files){
+  files=files.filter(f=>f.type.startsWith('image/')||f.type==='application/pdf'||/\.pdf$/i.test(f.name||''));
+  if(!files.length) return;
+  receiptQueue=files; receiptQueueTotal=files.length;
+  processNextReceipt();
+}
+function handleReceiptFiles(ev){
+  startReceiptQueue([...ev.target.files]);
+  ev.target.value=''; // allow re-selecting the same file(s) later
+}
+
+// Drag & drop — reliable on Mac/desktop Safari & Chrome; iOS Safari has limited support for
+// dropping Files-app content onto a web page, so the tap-to-pick button above remains the
+// primary path on iPhone. This is a bonus for desktop use, not a replacement.
+function onReceiptDragOver(ev){
+  ev.preventDefault();
+  document.getElementById('receiptDropZone').classList.add('drag-over');
+}
+function onReceiptDragLeave(ev){
+  document.getElementById('receiptDropZone').classList.remove('drag-over');
+}
+function onReceiptDrop(ev){
+  ev.preventDefault();
+  document.getElementById('receiptDropZone').classList.remove('drag-over');
+  const files=ev.dataTransfer && ev.dataTransfer.files ? [...ev.dataTransfer.files] : [];
+  if(!files.length) return;
+  startReceiptQueue(files);
+}
+
+async function processNextReceipt(){
+  if(!receiptQueue.length) return;
+  const file=receiptQueue.shift();
+  const isPdf = file.type==='application/pdf' || /\.pdf$/i.test(file.name||'');
+  const posLabel = receiptQueueTotal>1 ? ` (${receiptQueueTotal-receiptQueue.length} of ${receiptQueueTotal})` : '';
   const btn=document.getElementById('scanReceiptBtn');
   const statusEl=document.getElementById('ocrStatus');
-  statusEl.classList.remove('hide'); statusEl.textContent='📖 Reading receipt…';
+  statusEl.classList.remove('hide'); statusEl.textContent=`📖 Reading ${isPdf?'PDF':'receipt'}${posLabel}…`;
   btn.disabled=true;
+  btn.textContent = receiptQueue.length ? `📷 Scan receipt (${receiptQueue.length} more queued)` : '📷 Scan receipt / screenshot';
 
   try{
-    const compressed=await compressImage(file);
-    pendingAttachment={ blob:compressed, filename:(file.name||'receipt')+'.jpg' };
-    showAttachmentPreview(compressed);
+    let text='';
+    if(isPdf){
+      // PDFs aren't compressed like images — stored as-is, and shown with a generic document
+      // icon in the preview since rendering a real thumbnail would need an extra rasterize step.
+      pendingAttachment={ blob:file, filename:file.name||'receipt.pdf', isPdf:true };
+      showAttachmentPreview(file, true);
 
-    if(typeof Tesseract==='undefined'){
-      statusEl.textContent='⚠️ OCR library not loaded — screenshot will still be attached, but fields won\'t auto-fill. Fill them in manually.';
-      btn.disabled=false; ev.target.value=''; return;
+      if(typeof pdfjsLib==='undefined'){
+        statusEl.textContent=`⚠️ PDF library not loaded${posLabel} — PDF will still be attached, but fields won't auto-fill. Fill them in manually.`;
+        return;
+      }
+      text = await extractPdfText(file);
+    }else{
+      const compressed=await compressImage(file);
+      pendingAttachment={ blob:compressed, filename:(file.name||'receipt')+'.jpg', isPdf:false };
+      showAttachmentPreview(compressed, false);
+
+      if(typeof Tesseract==='undefined'){
+        statusEl.textContent=`⚠️ OCR library not loaded${posLabel} — screenshot will still be attached, but fields won't auto-fill. Fill them in manually.`;
+        return;
+      }
+
+      // Hard timeout: OCR must never hang forever. First run also downloads ~9MB of model
+      // data (one-time, then cached offline by the service worker), which can be slow on
+      // cellular — the phase + progress % below keeps that visible instead of a static message.
+      const worker = await getTesseractWorker((phase,pct)=>{ statusEl.textContent = `📖 ${phase}${posLabel}… ${pct}%`; });
+      const recognizePromise = worker.recognize(compressed);
+      const timeoutPromise = new Promise((_,reject)=>setTimeout(()=>reject(new Error('ocr-timeout')), 90000));
+      const result = await Promise.race([recognizePromise, timeoutPromise]);
+      text = result.data.text;
     }
 
-    const worker = await getTesseractWorker();
-    const { data:{ text } } = await worker.recognize(compressed);
     const extracted = extractFromOCRText(text);
+    const paymentInfo = detectPaymentInfo(text);
 
     if(extracted.amount) amount.value=extracted.amount;
     const parsedDate=parseGuessedDate(extracted.date);
@@ -1124,38 +1419,76 @@ async function handleReceiptFile(ev){
     if(extracted.merchant) merchant.value=extracted.merchant;
     if(extracted.utr) utr.value=extracted.utr;
 
-    const foundAny = extracted.amount||parsedDate||extracted.merchant||extracted.utr;
+    if(paymentInfo.paymentType){
+      paymentType.value=paymentInfo.paymentType;
+      onPaymentTypeChange(); // repopulate paymentSource options for the newly-set type before selecting one
+      if(paymentInfo.paymentSource) paymentSource.value=paymentInfo.paymentSource;
+    }
+
+    const catSuggestion = suggestCategoryForMerchant(extracted.merchant, expenses);
+    if(catSuggestion){
+      category.value=catSuggestion.category;
+      onCategoryChange();
+      if(catSuggestion.subcategory) subcategory.value=catSuggestion.subcategory;
+    }
+
+    const foundAny = extracted.amount||parsedDate||extracted.merchant||extracted.utr||paymentInfo.paymentType||catSuggestion;
     if(foundAny){
-      statusEl.textContent='✓ Some fields guessed from the screenshot — please verify below before saving.';
+      statusEl.textContent=`✓ Some fields guessed from the ${isPdf?'PDF':'screenshot'}${posLabel} — please verify below before saving.`;
       document.getElementById('reviewNote').classList.remove('hide');
     }else{
-      statusEl.textContent='Could not confidently read any fields — please fill them in manually. Screenshot will still be attached.';
+      statusEl.textContent=`Could not confidently read any fields${posLabel} — please fill them in manually. ${isPdf?'PDF':'Screenshot'} will still be attached.`;
     }
   }catch(e){
     console.error(e);
-    statusEl.textContent='⚠️ Could not process the image — you can still fill the form manually.';
+    if(e.message==='ocr-timeout'){
+      statusEl.textContent=`⚠️ Reading is taking too long${posLabel} (slow connection downloading the OCR model, or a stuck worker) — screenshot is still attached, please fill fields manually. It should be faster next time.`;
+      _tessWorker=null; // discard a possibly-stuck worker so the next attempt starts fresh
+    }else{
+      statusEl.textContent=`⚠️ Could not process the ${isPdf?'PDF':'image'}${posLabel} — you can still fill the form manually.`;
+    }
   }finally{
-    btn.disabled=false; ev.target.value='';
+    btn.disabled=false;
+    btn.textContent = receiptQueue.length ? `📷 Scan receipt (${receiptQueue.length} more queued)` : '📷 Scan receipt / screenshot';
   }
 }
 
 let _tessWorker=null;
-async function getTesseractWorker(){
+async function getTesseractWorker(onProgress){
   if(_tessWorker) return _tessWorker;
+  const phaseLabel={
+    'loading tesseract core':'Downloading OCR engine',
+    'initializing tesseract':'Starting OCR engine',
+    'loading language traineddata':'Downloading language data',
+    'initializing api':'Preparing OCR',
+    'recognizing text':'Reading receipt'
+  };
   _tessWorker = await Tesseract.createWorker('eng', 1, {
     workerPath: './lib/tesseract-worker.min.js',
     corePath: './lib/tesseract-core-lstm.wasm.js',
     langPath: './lib',
-    gzip: true
+    gzip: true,
+    logger: m=>{
+      if(!onProgress || typeof m.progress!=='number') return;
+      const label=phaseLabel[m.status] || m.status || 'Working';
+      onProgress(label, Math.round(m.progress*100));
+    }
   });
   return _tessWorker;
 }
 
-function showAttachmentPreview(blob){
-  const url=URL.createObjectURL(blob);
+function showAttachmentPreview(blob, isPdf){
   const img=document.getElementById('attachmentThumb');
-  if(img.dataset.prevUrl) URL.revokeObjectURL(img.dataset.prevUrl);
-  img.src=url; img.dataset.prevUrl=url;
+  const pdfIcon=document.getElementById('attachmentThumbPdf');
+  if(img.dataset.prevUrl){ URL.revokeObjectURL(img.dataset.prevUrl); img.dataset.prevUrl=''; }
+  if(isPdf){
+    img.classList.add('hide'); img.removeAttribute('src');
+    pdfIcon.classList.remove('hide');
+  }else{
+    pdfIcon.classList.add('hide'); img.classList.remove('hide');
+    const url=URL.createObjectURL(blob);
+    img.src=url; img.dataset.prevUrl=url;
+  }
   document.getElementById('attachmentInfo').textContent = `${Math.round(blob.size/1024)} KB — will be saved with this transaction`;
   document.getElementById('attachmentPreview').classList.remove('hide');
 }
@@ -1177,6 +1510,7 @@ function addExpense(ev){
    category: isSpendLike ? category.value : '', subcategory: isSpendLike ? subcategory.value : '',
    merchant: merchant.value.trim(), paymentType: paymentType.value, paymentSource: paymentSource.value,
    utr: utr.value.trim(), note: note.value.trim(),
+   recurringBillId: billLink.value || null,
    importSource: attachmentToSave ? 'screenshot-ocr' : 'manual'
  });
  expenses.push(txn);
@@ -1188,7 +1522,13 @@ function addExpense(ev){
  recalc();
  toast(ok?`✓ Saved — ${expenses.length} entries stored`:'⚠️ Save may have failed — check storage');
  odAutoSyncIfConnected();
- go('home');
+
+ if(receiptQueue.length){
+   // more screenshots queued from this batch — stay on Add and process the next one instead of navigating away
+   processNextReceipt();
+ }else{
+   go('home');
+ }
 
  if(attachmentToSave){
    saveAttachment(txn.id, attachmentToSave.blob, {filename:attachmentToSave.filename})
@@ -1371,14 +1711,16 @@ function hideInstall(){document.getElementById('installBanner').classList.add('h
 /* ===== Boot ===== */
 loadExpenses();
 loadCards();
+loadRecurringBills();
 const savedSalary=Number(localStorage.getItem(SALARY_KEY));
 if(savedSalary>0) CFG.salary=savedSalary;
-document.getElementById('fixedList').innerHTML=CFG.fixed.map(x=>`<div class="cell"><span class="l">${x[0]}</span><span class="r">${money(x[1])}</span></div>`).join('');
 populateCategorySelect();
 onPaymentTypeChange();
 onTypeChange();
 updateMerchantList();
 renderCards();
+populateBillLinkSelect();
+renderBillsSettingsList();
 recalc();
 
 if(/iPhone|iPad|iPod/i.test(navigator.userAgent) && !window.navigator.standalone){

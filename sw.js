@@ -1,13 +1,14 @@
-const CACHE='saving-guard-v8';
+const CACHE='saving-guard-v10';
 // Precached at install: everything needed for the core app to work offline immediately.
 // Large OCR assets (wasm core, language data) are NOT precached here — they'd slow down or
 // risk failing the initial install on a slow connection. Instead they're cached opportunistically
 // the first time they're actually fetched (see the fetch handler below), so OCR works offline
-// from the second use onward without penalizing first install.
+// from the second use onward without penalizing first install. pdf.min.js is small enough to
+// precache directly; pdf.worker.min.js (~1MB) is left to the opportunistic path.
 const ASSETS=[
   './','./index.html','./manifest.webmanifest','./icon-180.png','./icon-512.png',
   './msal-browser.min.js','./lib/xlsx.full.min.js','./lib/chart.umd.js',
-  './lib/tesseract.min.js','./lib/tesseract-worker.min.js'
+  './lib/tesseract.min.js','./lib/tesseract-worker.min.js','./lib/pdf.min.js'
 ];
 
 self.addEventListener('install', e=>{
