@@ -1,4 +1,4 @@
-const CACHE='saving-guard-v10';
+const CACHE='saving-guard-v12';
 // Precached at install: everything needed for the core app to work offline immediately.
 // Large OCR assets (wasm core, language data) are NOT precached here — they'd slow down or
 // risk failing the initial install on a slow connection. Instead they're cached opportunistically

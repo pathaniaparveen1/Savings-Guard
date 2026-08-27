@@ -54,7 +54,7 @@
   }
 }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
-html,body{height:100%}
+html,body{height:100%; overflow:hidden}
 body{
   margin:0; background:var(--paper); color:var(--ink);
   font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;
@@ -77,14 +77,19 @@ body{
 .navbar .row{display:flex; align-items:baseline; justify-content:space-between}
 .navbar .sub{font-size:13px; color:var(--muted); margin-top:2px}
 
-.screen{display:none; max-width:640px; margin:0 auto; padding:16px 16px calc(100px + env(safe-area-inset-bottom))}
-.screen.active{display:block; animation:rise .32s cubic-bezier(.22,1,.36,1)}
+.screen{display:none; max-width:640px; margin:0 auto; padding:16px 16px calc(100px + env(safe-area-inset-bottom)); box-sizing:border-box}
+.screen.active{
+  display:block;
+  height:100dvh; height:100vh; /* 100dvh accounts for iOS Safari's dynamic address bar; 100vh is the fallback for older browsers (overridden by dvh where supported) */
+  overflow-y:auto; -webkit-overflow-scrolling:touch;
+  animation:rise .32s cubic-bezier(.22,1,.36,1);
+}
 @keyframes rise{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:translateY(0)}}
 @media(prefers-reduced-motion:reduce){.screen.active{animation:none}}
 
 .group-label{margin:22px 6px 8px}
-.drop-zone{border:1.5px dashed var(--sep); border-radius:var(--radius-lg); padding:12px; transition:border-color .2s, background .2s}
-.drop-zone.drag-over{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent)}
+.drop-zone{border:1px dashed var(--sep); border-radius:var(--radius-md); padding:8px; margin-top:8px; transition:border-color .2s, background .2s; opacity:.75}
+.drop-zone.drag-over{opacity:1; border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent)}
 .group{background:var(--card); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow)}
 .cell{display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:0.5px solid var(--sep); gap:12px}
 .cell:last-child{border-bottom:none}
@@ -237,12 +242,16 @@ body{
 <section id="screen-add" class="screen">
   <div class="navbar" data-nav="add"><div class="row"><div><div class="large-title">Add transaction</div></div></div></div>
   <div style="padding-top:16px">
+    <div class="row2">
+      <button class="btn secondary" id="scanReceiptBtn" onclick="document.getElementById('receiptImageFile').click()">📷 Scan Receipt</button>
+      <button class="btn secondary" id="importPdfBtn" onclick="document.getElementById('receiptPdfFile').click()">📄 Import PDF</button>
+    </div>
+    <!-- No `capture` attribute: this lets iOS show its native action sheet — Take Photo /
+         Photo Library / Choose File — rather than forcing straight into the camera. -->
+    <input id="receiptImageFile" type="file" accept="image/*" multiple style="display:none" onchange="handleReceiptFiles(event)">
+    <input id="receiptPdfFile" type="file" accept="application/pdf" multiple style="display:none" onchange="handleReceiptFiles(event)">
     <div id="receiptDropZone" class="drop-zone" ondragover="onReceiptDragOver(event)" ondragleave="onReceiptDragLeave(event)" ondrop="onReceiptDrop(event)">
-      <div class="stack" style="margin-top:0">
-        <button class="btn secondary" id="scanReceiptBtn" onclick="document.getElementById('receiptFile').click()">📷 Scan receipt / screenshot / PDF</button>
-        <input id="receiptFile" type="file" accept="image/*,application/pdf" multiple style="display:none" onchange="handleReceiptFiles(event)">
-      </div>
-      <div class="footnote" style="text-align:center; margin-top:8px" id="dropHint">or drag &amp; drop screenshots/PDFs here (works best on Mac/desktop browser)</div>
+      <div class="footnote" style="text-align:center" id="dropHint">or drag &amp; drop files here — Mac/desktop only, optional</div>
     </div>
     <div id="ocrStatus" class="footnote hide" style="margin:8px 6px 0"></div>
     <div id="attachmentPreview" class="group hide" style="margin-top:10px; padding:10px 12px; display:flex; align-items:center; gap:10px">
@@ -288,6 +297,7 @@ body{
       <div class="group">
         <div class="field"><label>Payment type</label>
           <select id="paymentType" onchange="onPaymentTypeChange()">
+            <option value="">— Not detected / select —</option>
             <option>UPI</option><option>Card</option><option>Cash</option><option>Bank Transfer</option><option>Other</option>
           </select>
         </div>
@@ -637,24 +647,51 @@ async function extractPdfText(file){
 }
 
 function extractFromOCRText(text){
-  const out={amount:null, date:null, time:null, merchant:null, utr:null};
+  const out={amount:null, date:null, time:null, merchant:null, utr:null, amountConfidence:null};
   if(!text) return out;
   const clean=text.replace(/\r/g,'');
 
-  // Amount: prefer one near "amount"/"paid"/"total", else the largest ₹/Rs figure found
-  const amtMatches=[...clean.matchAll(/(?:₹|Rs\.?|INR)\s?([\d,]+(?:\.\d{1,2})?)/gi)];
-  if(amtMatches.length){
-    const near=clean.match(/(?:amount|paid|total)[^\n₹Rs]{0,20}(?:₹|Rs\.?|INR)\s?([\d,]+(?:\.\d{1,2})?)/i);
-    const pick = near ? near[1] : amtMatches.map(m=>m[1]).sort((a,b)=>parseFloat(b.replace(/,/g,''))-parseFloat(a.replace(/,/g,'')))[0];
+  // --- Amount: layered signals, strongest first. Never just "the largest number in the text" —
+  // that would happily grab a UTR, phone number, or account number instead of the amount. ---
+  const currencyMatches=[...clean.matchAll(/(?:₹|Rs\.?|INR)\s?([\d,]+(?:\.\d{1,2})?)/gi)];
+  // Tesseract commonly misreads the ₹ glyph as ~ or ≈ when it sits alone at the start of a line
+  // (very common on GPay/PhonePe confirmation screens) — trust this only in that specific position.
+  const misreadMatches=[...clean.matchAll(/(?:^|\n)\s*[~≈]\s?([\d,]+\.\d{2})\b/gm)];
+  const allAmtMatches=[...currencyMatches, ...misreadMatches];
+  if(allAmtMatches.length){
+    const near=clean.match(/(?:amount|paid|total)[^\n]{0,20}?(?:₹|Rs\.?|INR|[~≈])\s?([\d,]+(?:\.\d{1,2})?)/i);
+    const pick = near ? near[1] : allAmtMatches.map(m=>m[1]).sort((a,b)=>parseFloat(b.replace(/,/g,''))-parseFloat(a.replace(/,/g,'')))[0];
     out.amount = Math.round(parseFloat(pick.replace(/,/g,'')));
+    out.amountConfidence='high';
+  }else{
+    // Fallback A: a standalone decimal-formatted number (X.XX) near the top of the document with
+    // no currency symbol at all — the ₹ glyph is sometimes dropped by OCR entirely rather than misread.
+    const topLines=clean.split('\n').slice(0,5);
+    let found=false;
+    for(const line of topLines){
+      const m=line.match(/^\s*\W{0,2}\s?([\d,]{1,8}\.\d{2})\s*$/);
+      if(m){ out.amount=Math.round(parseFloat(m[1].replace(/,/g,''))); out.amountConfidence='medium'; found=true; break; }
+    }
+    if(!found){
+      // Fallback B: a bare integer immediately followed by a payment-mode word — common on bank/
+      // insurance payment slips laid out as a table, where the amount has no ₹ and no decimals.
+      // Flattened because table cells often wrap onto their own line, splitting number from label.
+      const flat=clean.replace(/\s+/g,' ');
+      const modeMatch=flat.match(/\b(\d{2,7})\s+(?:Online\s*Payment|Cheque|Cash\b|NEFT|RTGS|Card\b|Demand\s*Draft|DD\b|UPI\b)/i);
+      if(modeMatch){ out.amount=parseInt(modeMatch[1],10); out.amountConfidence='medium'; }
+    }
   }
 
   // UTR / reference / transaction id
   const utrMatch = clean.match(/(?:UTR|UPI\s*Ref(?:erence)?\s*(?:No\.?|Number)?|Txn\s*ID|Transaction\s*ID|Ref(?:erence)?\s*No\.?)[:\s]*([A-Za-z0-9]{6,25})/i);
   if(utrMatch) out.utr = utrMatch[1];
 
-  // Date: "16 Aug", "16 Aug 2026", "16/08/2026", "16-08-26"
-  const dateMatch = clean.match(/(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?,?\s*\d{0,4})/i)
+  // Date: prefer an explicitly-labeled "Transaction Date" over other dates on the document
+  // (invoice date, due date, policy date, "Dated" column, etc. can differ from it).
+  const labeledDate = clean.match(/Transaction\s*Date[:\s]+(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/i)
+    || clean.match(/Transaction\s*Date[:\s]+(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?,?\s*\d{0,4})/i);
+  const dateMatch = labeledDate
+    || clean.match(/(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?,?\s*\d{0,4})/i)
     || clean.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
   if(dateMatch) out.date = dateMatch[1].trim();
 
@@ -662,12 +699,32 @@ function extractFromOCRText(text){
   const timeMatch = clean.match(/(\d{1,2}:\d{2}\s?(?:AM|PM|am|pm)?)/);
   if(timeMatch) out.time = timeMatch[1].trim();
 
-  // Merchant: "Paid to <name>" / "To <name>" (UPI apps) or "Merchant: <name>" (receipts/invoices)
-  const merchMatch = clean.match(/(?:Paid\s*to|To)[:\s]+([A-Za-z][A-Za-z0-9 &.'-]{2,40})/i)
-    || clean.match(/Merchant[:\s]+([A-Za-z][A-Za-z0-9 &.'-]{2,40})/i);
+  // Merchant: "Paid to <name>" / "To <name>" (UPI apps) or "Merchant: <name>" (receipts/invoices).
+  // Anchored to the START of a line — without this, "...subject to underwriting approval..." in
+  // an insurance PDF's fine print matches "to underwriting approval..." as a fake merchant name,
+  // since the word "to" appears constantly in ordinary prose, not just as a payee label.
+  const merchMatch = clean.match(/^\s*(?:Paid\s*to|To)\s*:?\s*\n?\s*([A-Z][A-Za-z0-9 &.'-]{2,40})\s*$/im)
+    || clean.match(/^\s*Merchant\s*:?\s*\n?\s*([A-Z][A-Za-z0-9 &.'-]{2,40})\s*$/im);
   if(merchMatch) out.merchant = merchMatch[1].trim();
 
   return out;
+}
+
+// Evidence-based category suggestion from receipt/PDF text — used as a fallback when the merchant
+// has no prior history (suggestCategoryForMerchant). Maps to EXISTING categories only; returns
+// null (never a guess) when there's no textual evidence at all. This is what stops an insurance
+// payment from silently becoming "Food" just because that happens to be the first category option.
+function suggestCategoryFromText(text){
+  if(!text) return null;
+  const rules=[
+    [/insurance|premium\b|policy\b/i, 'Medical','Other Medical'],
+    [/hospital|clinic|pharmacy|doctor|medicine/i, 'Medical','Other Medical'],
+    [/petrol|diesel|\bfuel\b/i, 'Travel','Other Travel'],
+    [/school|tuition/i, 'Family','Other Family'],
+    [/restaurant|cafe|zomato|swiggy/i, 'Food','Restaurant'],
+  ];
+  for(const [re,cat,sub] of rules){ if(re.test(text)) return {category:cat, subcategory:sub}; }
+  return null;
 }
 
 // Detects payment app/card/bank from OCR text. Order matters: card-specific names are checked
@@ -1310,12 +1367,12 @@ function onTypeChange(){
   document.getElementById('categoryGroupLabel').classList.toggle('hide', !isSpendLike);
 }
 function populateCategorySelect(){
-  category.innerHTML = Object.keys(CATEGORIES).map(c=>`<option>${c}</option>`).join('');
+  category.innerHTML = `<option value="">— Not detected / select —</option>` + Object.keys(CATEGORIES).map(c=>`<option>${c}</option>`).join('');
   onCategoryChange();
 }
 function onCategoryChange(){
   const subs=CATEGORIES[category.value]||[];
-  subcategory.innerHTML = subs.map(s=>`<option>${s}</option>`).join('');
+  subcategory.innerHTML = category.value ? subs.map(s=>`<option>${s}</option>`).join('') : `<option value="">—</option>`;
 }
 function populatePaymentTypeOptions(){ onPaymentTypeChange(); }
 function onPaymentTypeChange(){
@@ -1323,7 +1380,7 @@ function onPaymentTypeChange(){
   const sources = t==='Card'
     ? Object.keys(CFG.cards).length ? Object.keys(CFG.cards) : PAYMENT_SOURCES.Card
     : (PAYMENT_SOURCES[t] || ['Other']);
-  paymentSource.innerHTML = sources.map(s=>`<option>${s}</option>`).join('');
+  paymentSource.innerHTML = `<option value="">— Not detected / select —</option>` + sources.map(s=>`<option>${s}</option>`).join('');
   document.getElementById('paymentSourceField').classList.toggle('hide', t==='Cash');
 }
 function updateMerchantList(){
@@ -1333,6 +1390,19 @@ function updateMerchantList(){
 
 /* ===== Screenshot scan → OCR → review-prefill flow ===== */
 let pendingAttachment=null; // { blob, filename, ocrText }
+
+// Clears every OCR-influenced field back to a genuine blank/"not detected" state. Called at the
+// start of each receipt scan — a previous scan's values (or the form's plain default) must never
+// silently carry over and look like they came from THIS document. This is the direct fix for the
+// bug where an undetected payment source appeared to be "Tata Neu UPI" (it was just the dropdown's
+// first option, left over/unchanged) and an undetected category appeared to be "Food" likewise.
+function resetAddFormForNewScan(){
+  amount.value=''; merchant.value=''; utr.value=''; note.value='';
+  date.value=todayISO();
+  category.value=''; onCategoryChange();
+  paymentType.value=''; onPaymentTypeChange();
+  document.getElementById('reviewNote').classList.add('hide');
+}
 
 let receiptQueue=[]; // remaining files to process, for multi-screenshot batch scans
 let receiptQueueTotal=0;
@@ -1371,11 +1441,18 @@ async function processNextReceipt(){
   const file=receiptQueue.shift();
   const isPdf = file.type==='application/pdf' || /\.pdf$/i.test(file.name||'');
   const posLabel = receiptQueueTotal>1 ? ` (${receiptQueueTotal-receiptQueue.length} of ${receiptQueueTotal})` : '';
-  const btn=document.getElementById('scanReceiptBtn');
+  const scanBtn=document.getElementById('scanReceiptBtn');
+  const pdfBtn=document.getElementById('importPdfBtn');
   const statusEl=document.getElementById('ocrStatus');
   statusEl.classList.remove('hide'); statusEl.textContent=`📖 Reading ${isPdf?'PDF':'receipt'}${posLabel}…`;
-  btn.disabled=true;
-  btn.textContent = receiptQueue.length ? `📷 Scan receipt (${receiptQueue.length} more queued)` : '📷 Scan receipt / screenshot';
+  scanBtn.disabled=true; pdfBtn.disabled=true;
+  const queuedLabel = receiptQueue.length ? ` (${receiptQueue.length} more queued)` : '';
+  scanBtn.textContent = '📷 Scan Receipt'+(!isPdf?queuedLabel:'');
+  pdfBtn.textContent = '📄 Import PDF'+(isPdf?queuedLabel:'');
+
+  // Reset every OCR-influenced field to a genuine blank/"not detected" state BEFORE processing
+  // this file — a previous scan's (or the form's default) values must never leak into this one.
+  resetAddFormForNewScan();
 
   try{
     let text='';
@@ -1390,6 +1467,13 @@ async function processNextReceipt(){
         return;
       }
       text = await extractPdfText(file);
+      if(text.replace(/\s/g,'').length < 20){
+        // Almost no extractable text = this is very likely a scanned/image-only PDF, not a text
+        // PDF. Say so honestly instead of silently producing an empty/wrong transaction — full
+        // page-rasterize-then-OCR for scanned PDFs isn't implemented yet (documented limitation).
+        statusEl.textContent=`⚠️ This PDF appears to contain scanned images — text extraction was not possible${posLabel}. Please fill in the fields manually, or re-save it as a screenshot and use "Scan Receipt" instead. PDF is still attached.`;
+        return;
+      }
     }else{
       const compressed=await compressImage(file);
       pendingAttachment={ blob:compressed, filename:(file.name||'receipt')+'.jpg', isPdf:false };
@@ -1412,32 +1496,37 @@ async function processNextReceipt(){
 
     const extracted = extractFromOCRText(text);
     const paymentInfo = detectPaymentInfo(text);
+    const detectedFields=[]; // for an honest, specific "here's what was actually found" summary
 
-    if(extracted.amount) amount.value=extracted.amount;
+    if(extracted.amount){ amount.value=extracted.amount; detectedFields.push('Amount'+(extracted.amountConfidence==='medium'?' (approx.)':'')); }
     const parsedDate=parseGuessedDate(extracted.date);
-    if(parsedDate) date.value=parsedDate;
-    if(extracted.merchant) merchant.value=extracted.merchant;
-    if(extracted.utr) utr.value=extracted.utr;
+    if(parsedDate){ date.value=parsedDate; detectedFields.push('Date'); }
+    if(extracted.merchant){ merchant.value=extracted.merchant; detectedFields.push('Merchant'); }
+    if(extracted.utr){ utr.value=extracted.utr; detectedFields.push('UTR'); }
 
     if(paymentInfo.paymentType){
       paymentType.value=paymentInfo.paymentType;
       onPaymentTypeChange(); // repopulate paymentSource options for the newly-set type before selecting one
-      if(paymentInfo.paymentSource) paymentSource.value=paymentInfo.paymentSource;
+      if(paymentInfo.paymentSource){ paymentSource.value=paymentInfo.paymentSource; detectedFields.push('Payment source ('+paymentInfo.paymentSource+')'); }
     }
+    // paymentType/paymentSource are left at their reset "— Not detected —" placeholder when
+    // nothing matched — never silently left showing whatever the dropdown's first real option is.
 
-    const catSuggestion = suggestCategoryForMerchant(extracted.merchant, expenses);
+    // Category: prefer this merchant's own history; fall back to keyword evidence in the document
+    // text itself (e.g. "insurance"/"premium" → Medical). Never falls through to a default category.
+    const catSuggestion = suggestCategoryForMerchant(extracted.merchant, expenses) || suggestCategoryFromText(text);
     if(catSuggestion){
       category.value=catSuggestion.category;
       onCategoryChange();
       if(catSuggestion.subcategory) subcategory.value=catSuggestion.subcategory;
+      detectedFields.push('Category ('+catSuggestion.category+')');
     }
 
-    const foundAny = extracted.amount||parsedDate||extracted.merchant||extracted.utr||paymentInfo.paymentType||catSuggestion;
-    if(foundAny){
-      statusEl.textContent=`✓ Some fields guessed from the ${isPdf?'PDF':'screenshot'}${posLabel} — please verify below before saving.`;
+    if(detectedFields.length){
+      statusEl.textContent=`✓ Detected${posLabel}: ${detectedFields.join(', ')}. Please verify everything below before saving — anything not listed here was left blank on purpose.`;
       document.getElementById('reviewNote').classList.remove('hide');
     }else{
-      statusEl.textContent=`Could not confidently read any fields${posLabel} — please fill them in manually. ${isPdf?'PDF':'Screenshot'} will still be attached.`;
+      statusEl.textContent=`Could not confidently read any fields${posLabel} — all fields left blank for you to fill in manually. ${isPdf?'PDF':'Screenshot'} is still attached.`;
     }
   }catch(e){
     console.error(e);
@@ -1448,8 +1537,8 @@ async function processNextReceipt(){
       statusEl.textContent=`⚠️ Could not process the ${isPdf?'PDF':'image'}${posLabel} — you can still fill the form manually.`;
     }
   }finally{
-    btn.disabled=false;
-    btn.textContent = receiptQueue.length ? `📷 Scan receipt (${receiptQueue.length} more queued)` : '📷 Scan receipt / screenshot';
+    scanBtn.disabled=false; pdfBtn.disabled=false;
+    scanBtn.textContent='📷 Scan Receipt'; pdfBtn.textContent='📄 Import PDF';
   }
 }
 
@@ -1563,9 +1652,10 @@ function toast(msg, ms){
 /* ===== Navigation ===== */
 function go(name){
  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
- document.getElementById('screen-'+name).classList.add('active');
+ const target=document.getElementById('screen-'+name);
+ target.classList.add('active');
+ target.scrollTop=0; // each screen now owns its own scroll — the document itself no longer scrolls
  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
- window.scrollTo(0,0);
 }
 
 /* ===== Settings actions ===== */
@@ -1705,7 +1795,7 @@ function editSalary(){
   const v=prompt('Monthly in-hand salary (₹):',CFG.salary);
   if(v!==null && Number(v)>0){CFG.salary=Number(v); localStorage.setItem(SALARY_KEY,CFG.salary); recalc(); toast('Salary updated');}
 }
-function showInstall(){document.getElementById('installBanner').classList.remove('hide'); go('home'); window.scrollTo({top:0,behavior:'smooth'});}
+function showInstall(){document.getElementById('installBanner').classList.remove('hide'); go('home'); document.getElementById('screen-home').scrollTo({top:0,behavior:'smooth'});}
 function hideInstall(){document.getElementById('installBanner').classList.add('hide');}
 
 /* ===== Boot ===== */
